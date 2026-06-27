@@ -20,6 +20,7 @@ import {
   LayoutDashboard, Boxes, Beaker, Route, Save, Eye, Menu, CircleDot,
   ClipboardList, HandMetal, Droplets, Wind, Iron, PackageOpen, Home,
   ChevronLeft, Sparkles, BarChart3, Timer, ArrowUpRight, ArrowDownRight,
+  CalendarDays, ChevronDown, Filter, Activity, PieChart, Zap, Clock4,
 } from 'lucide-react'
 
 /* ══════════ Types ══════════ */
@@ -190,6 +191,51 @@ function SectionHeader({ title, description, action }: { title: string; descript
   )
 }
 
+function TabBar({ tabs, value, onChange }: { tabs: { key: string; label: string; count?: number }[]; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex gap-1 overflow-x-auto pb-1 -mx-1 px-1">
+      {tabs.map(t => (
+        <button key={t.key} onClick={() => onChange(t.key)}
+          className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+            value === t.key ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+          }`}>
+          {t.label}{t.count !== undefined && <span className="ml-1.5 opacity-60">{t.count}</span>}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function MiniBarChart({ data, maxValue }: { data: { label: string; value: number; color: string }[]; maxValue: number }) {
+  return (
+    <div className="flex items-end gap-1.5 h-24">
+      {data.map((d, i) => {
+        const h = maxValue > 0 ? Math.max(4, (d.value / maxValue) * 100) : 4
+        return (
+          <div key={i} className="flex-1 flex flex-col items-center gap-1">
+            <span className="text-[10px] font-medium text-slate-600">{d.value > 0 ? (d.value >= 1000 ? `${(d.value/1000).toFixed(0)}k` : d.value) : ''}</span>
+            <div className="w-full rounded-t-md transition-all duration-700" style={{ height: `${h}%`, backgroundColor: d.color, minHeight: '4px' }} />
+            <span className="text-[9px] text-slate-400 font-medium">{d.label}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function getWeekDays(offset: number) {
+  const now = new Date()
+  const monday = new Date(now)
+  monday.setDate(now.getDate() - now.getDay() + 1 + offset * 7)
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday)
+    d.setDate(monday.getDate() + i)
+    return d
+  })
+}
+
+const DAY_NAMES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
+
 /* ══════════ Main Component ══════════ */
 export default function LaundryApp() {
   const [user, setUser] = useState<UserData | null>(null)
@@ -229,6 +275,11 @@ export default function LaundryApp() {
   const [invForm, setInvForm] = useState({ name: '', category: 'GENERAL', quantity: 0, unit: 'unidad', minStock: 5, cost: 0 })
   const [matForm, setMatForm] = useState({ name: '', category: 'QUIMICO', quantity: 0, unit: 'litro', costPerUnit: 0, supplier: '' })
   const [delForm, setDelForm] = useState({ orderId: '', driverName: '', address: '', notes: '' })
+
+  // Filters
+  const [journeyService, setJourneyService] = useState('ALL')
+  const [invCategory, setInvCategory] = useState('ALL')
+  const [deliveryWeekOffset, setDeliveryWeekOffset] = useState(0)
 
   const apiFetch = useCallback(async (url: string, opts?: RequestInit) => {
     const res = await fetch(url, opts)
@@ -754,33 +805,135 @@ export default function LaundryApp() {
             {/* ══════════ ADMIN: DASHBOARD ══════════ */}
             {user.role === 'ADMIN' && activeTab === 'dashboard' && stats && (
               <>
-                <SectionHeader title="Panel de Control" description="Resumen general de la operación" />
+                <SectionHeader title="Panel de Control" description="Resumen ejecutivo de la operación" />
+                {/* Top KPIs */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                  <StatCard icon={<DollarSign className="h-5 w-5 text-white" />} label="Ingresos Hoy" value={formatPrice(stats.todayRevenue)} color="bg-emerald-500" trend="up" />
-                  <StatCard icon={<TrendingUp className="h-5 w-5 text-white" />} label="Ingresos Totales" value={formatPrice(stats.totalRevenue)} color="bg-slate-800" />
-                  <StatCard icon={<Package className="h-5 w-5 text-white" />} label="Pedidos Hoy" value={stats.todayOrders} color="bg-sky-500" trend="up" />
-                  <StatCard icon={<BarChart3 className="h-5 w-5 text-white" />} label="Total Pedidos" value={stats.totalOrders} color="bg-violet-500" />
+                  <Card className="border border-slate-200/60 bg-white hover:shadow-md transition-shadow">
+                    <CardContent className="p-5">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center"><DollarSign className="h-5 w-5 text-white" /></div>
+                        <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">+18%</span>
+                      </div>
+                      <p className="text-2xl font-bold text-slate-900">{formatPrice(stats.todayRevenue)}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">Ingresos hoy</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="border border-slate-200/60 bg-white hover:shadow-md transition-shadow">
+                    <CardContent className="p-5">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center"><TrendingUp className="h-5 w-5 text-white" /></div>
+                        <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">Total</span>
+                      </div>
+                      <p className="text-2xl font-bold text-slate-900">{formatPrice(stats.totalRevenue)}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">Ingresos acumulados</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="border border-slate-200/60 bg-white hover:shadow-md transition-shadow">
+                    <CardContent className="p-5">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="w-10 h-10 rounded-xl bg-sky-500 flex items-center justify-center"><ShoppingBag className="h-5 w-5 text-white" /></div>
+                        <span className="text-[10px] font-bold text-sky-600 bg-sky-50 px-2 py-0.5 rounded-full">+24%</span>
+                      </div>
+                      <p className="text-2xl font-bold text-slate-900">{stats.todayOrders}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">Pedidos hoy</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="border border-slate-200/60 bg-white hover:shadow-md transition-shadow">
+                    <CardContent className="p-5">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="w-10 h-10 rounded-xl bg-violet-500 flex items-center justify-center"><BarChart3 className="h-5 w-5 text-white" /></div>
+                        <span className="text-[10px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full">{stats.totalOrders > 0 ? Math.round((stats.statusCounts['ENTREGADO'] || 0) / stats.totalOrders * 100) : 0}%</span>
+                      </div>
+                      <p className="text-2xl font-bold text-slate-900">{stats.totalOrders}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">Pedidos totales</p>
+                    </CardContent>
+                  </Card>
                 </div>
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                  <StatCard icon={<Users className="h-5 w-5 text-white" />} label="Usuarios" value={stats.totalUsers} color="bg-amber-500" />
-                  <StatCard icon={<Shirt className="h-5 w-5 text-white" />} label="Prendas" value={stats.totalGarments} color="bg-pink-500" />
-                  <StatCard icon={<AlertCircle className="h-5 w-5 text-white" />} label="Stock Bajo" value={stats.lowStockItems} color="bg-red-500" />
-                  <StatCard icon={<Truck className="h-5 w-5 text-white" />} label="Entregas Pend." value={stats.pendingDeliveries} color="bg-orange-500" />
-                </div>
-                <Card className="border border-slate-200/60 bg-white">
-                  <CardHeader className="pb-3"><CardTitle className="text-sm font-semibold text-slate-900">Distribución por Estado</CardTitle></CardHeader>
-                  <CardContent>
-                    <div className="flex flex-wrap gap-2">
-                      {STATUS_FLOW.map(s => {
-                        const count = stats.statusCounts[s] || 0
-                        return (
-                          <div key={s} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-100 bg-slate-50/50">
-                            <div className={`w-2 h-2 rounded-full ${JOURNEY_STEPS.find(j => j.key === s)?.bg || 'bg-slate-300'}`} />
-                            <span className="text-xs text-slate-500">{STATUS_LABELS[s]}</span>
-                            <span className="text-sm font-bold text-slate-900">{count}</span>
+                {/* Charts + Pipeline row */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  {/* Pipeline chart */}
+                  <Card className="border border-slate-200/60 bg-white lg:col-span-2">
+                    <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold text-slate-900">Pipeline de Pedidos</CardTitle></CardHeader>
+                    <CardContent>
+                      <MiniBarChart data={STATUS_FLOW.map((s, i) => ({
+                        label: STATUS_LABELS[s].substring(0, 4),
+                        value: stats.statusCounts[s] || 0,
+                        color: ['#f59e0b', '#0ea5e9', '#8b5cf6', '#10b981', '#94a3b8'][i],
+                      }))} maxValue={Math.max(...STATUS_FLOW.map(s => stats.statusCounts[s] || 0), 1)} />
+                      <div className="flex flex-wrap gap-2 mt-4 pt-3 border-t border-slate-50">
+                        {STATUS_FLOW.map((s, si) => {
+                          const count = stats.statusCounts[s] || 0
+                          return (
+                            <div key={s} className="flex items-center gap-1.5">
+                              <div className={`w-2 h-2 rounded-full ${JOURNEY_STEPS[si]?.bg || 'bg-slate-300'}`} />
+                              <span className="text-[11px] text-slate-500">{STATUS_LABELS[s]} <b className="text-slate-900">{count}</b></span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+                  {/* Quick stats */}
+                  <div className="space-y-4">
+                    <Card className="border border-slate-200/60 bg-white">
+                      <CardContent className="p-4 space-y-3">
+                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Operación</p>
+                        {[
+                          { icon: <Users className="h-4 w-4 text-amber-500" />, label: 'Usuarios activos', value: stats.totalUsers, color: 'text-amber-600' },
+                          { icon: <Shirt className="h-4 w-4 text-pink-500" />, label: 'Prendas en proceso', value: stats.totalGarments, color: 'text-pink-600' },
+                          { icon: <Truck className="h-4 w-4 text-orange-500" />, label: 'Entregas pendientes', value: stats.pendingDeliveries, color: 'text-orange-600' },
+                          { icon: <AlertCircle className="h-4 w-4 text-red-500" />, label: 'Items con stock bajo', value: stats.lowStockItems, color: 'text-red-600' },
+                        ].map((item, i) => (
+                          <div key={i} className="flex items-center justify-between">
+                            <div className="flex items-center gap-2.5">{item.icon}<span className="text-xs text-slate-500">{item.label}</span></div>
+                            <span className={`text-sm font-bold ${item.color}`}>{item.value}</span>
                           </div>
-                        )
-                      })}
+                        ))}
+                      </CardContent>
+                    </Card>
+                    <Card className="border border-slate-200/60 bg-white">
+                      <CardContent className="p-4 space-y-3">
+                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Ingresos por Servicio</p>
+                        {Object.entries(SERVICE_LABELS).map(([key, label]) => {
+                          const svcOrders = orders.filter(o => o.serviceType === key)
+                          const rev = svcOrders.reduce((a, o) => a + o.price, 0)
+                          const pct = stats.totalRevenue > 0 ? Math.round(rev / stats.totalRevenue * 100) : 0
+                          return (
+                            <div key={key} className="space-y-1">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs text-slate-600 font-medium">{label}</span>
+                                <span className="text-xs font-bold text-slate-900">{formatPrice(rev)}</span>
+                              </div>
+                              <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </CardContent>
+                    </Card>
+                  </div>
+                </div>
+                {/* Recent Activity */}
+                <Card className="border border-slate-200/60 bg-white">
+                  <CardHeader className="pb-2"><CardTitle className="text-sm font-semibold text-slate-900">Actividad Reciente</CardTitle></CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {orders.slice(0, 5).map(order => (
+                        <div key={order.id} className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer" onClick={() => openOrderDetail(order.id)}>
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
+                            order.status === 'ENTREGADO' ? 'bg-slate-100 text-slate-400' :
+                            order.status === 'LISTO' ? 'bg-emerald-100 text-emerald-600' :
+                            order.status === 'EN_LAVADO' ? 'bg-violet-100 text-violet-600' : 'bg-amber-100 text-amber-600'
+                          }`}>{order.clientName.charAt(0)}</div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-slate-900 truncate">{order.clientName} — {SERVICE_LABELS[order.serviceType]}</p>
+                            <p className="text-[10px] text-slate-400">{order.pickupDate} · {order.pickupTime}</p>
+                          </div>
+                          <StatusBadge status={order.status} />
+                          <span className="text-xs font-bold text-slate-900 ml-auto">{formatPrice(order.price)}</span>
+                        </div>
+                      ))}
                     </div>
                   </CardContent>
                 </Card>
@@ -788,49 +941,70 @@ export default function LaundryApp() {
             )}
 
             {/* ══════════ ADMIN: JOURNEY ══════════ */}
-            {user.role === 'ADMIN' && activeTab === 'journey' && (
-              <>
-                <SectionHeader title="Journey de Pedidos" description="Vista pipeline del recorrido de cada pedido en tiempo real" />
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-                  {JOURNEY_STEPS.map(step => {
-                    const stepOrders = orders.filter(o => o.status === step.key)
-                    return (
-                      <div key={step.key} className="space-y-3">
-                        <div className="flex items-center gap-2 px-1">
-                          <div className={`w-7 h-7 rounded-lg ${step.bg} flex items-center justify-center shadow-sm`}>
-                            <step.icon className="h-3.5 w-3.5 text-white" />
+            {user.role === 'ADMIN' && activeTab === 'journey' && (() => {
+              const filteredOrders = journeyService === 'ALL' ? orders : orders.filter(o => o.serviceType === journeyService)
+              const serviceTabs = [
+                { key: 'ALL', label: 'Todos', count: orders.length },
+                ...Object.entries(SERVICE_LABELS).map(([k, v]) => ({ key: k, label: v, count: orders.filter(o => o.serviceType === k).length })),
+              ]
+              // Group by client
+              const clientGroups: Record<string, OrderData[]> = {}
+              filteredOrders.forEach(o => {
+                const key = o.clientName
+                if (!clientGroups[key]) clientGroups[key] = []
+                clientGroups[key].push(o)
+              })
+              const sortedClients = Object.entries(clientGroups).sort((a, b) => b[1].length - a[1].length)
+              return (
+                <>
+                  <SectionHeader title="Journey de Pedidos" description="Seguimiento en tiempo real por cliente y servicio" />
+                  <TabBar tabs={serviceTabs} value={journeyService} onChange={setJourneyService} />
+                  <div className="space-y-4 mt-4">
+                    {sortedClients.map(([clientName, clientOrders]) => (
+                      <Card key={clientName} className="border border-slate-200/60 bg-white overflow-hidden">
+                        <div className="px-4 py-3 bg-slate-50/80 border-b border-slate-100 flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-slate-900 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">{clientName.charAt(0)}</div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-slate-900">{clientName}</p>
+                            <p className="text-[11px] text-slate-400">{clientOrders.length} pedido{clientOrders.length !== 1 ? 's' : ''} · Total: {formatPrice(clientOrders.reduce((a, o) => a + o.price, 0))}</p>
                           </div>
-                          <div>
-                            <p className="text-xs font-semibold text-slate-900">{step.label}</p>
-                            <p className="text-[10px] text-slate-400">{stepOrders.length} pedidos</p>
+                          <div className="flex gap-1.5">
+                            {clientOrders.map(o => (
+                              <div key={o.id} className={`w-2.5 h-2.5 rounded-full ${JOURNEY_STEPS[STATUS_FLOW.indexOf(o.status)]?.bg || 'bg-slate-300'}`} title={`${o.clientName}: ${STATUS_LABELS[o.status]}`} />
+                            ))}
                           </div>
                         </div>
-                        <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
-                          {stepOrders.map(o => (
-                            <Card key={o.id} className="border border-slate-200/60 bg-white hover:shadow-sm transition-shadow cursor-pointer" onClick={() => openOrderDetail(o.id)}>
-                              <CardContent className="p-3 space-y-2">
-                                <p className="text-xs font-semibold text-slate-900 truncate">{o.clientName}</p>
-                                <div className="flex items-center justify-between">
-                                  <Badge variant="secondary" className="text-[10px] rounded-md">{SERVICE_LABELS[o.serviceType]}</Badge>
-                                  <span className="text-xs font-bold text-emerald-600">{formatPrice(o.price)}</span>
+                        <CardContent className="p-0">
+                          <div className="divide-y divide-slate-50">
+                            {clientOrders.map(order => (
+                              <div key={order.id} className="px-4 py-3 hover:bg-slate-50/50 transition-colors cursor-pointer" onClick={() => openOrderDetail(order.id)}>
+                                <div className="flex items-center justify-between gap-3 mb-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <Badge variant="secondary" className="text-[10px] rounded-md font-medium">{SERVICE_LABELS[order.serviceType]}</Badge>
+                                    <StatusBadge status={order.status} />
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[11px] text-slate-400">{order.pickupDate} · {order.pickupTime}</span>
+                                    <span className="text-xs font-bold text-slate-900">{formatPrice(order.price)}</span>
+                                  </div>
                                 </div>
-                                <p className="text-[10px] text-slate-400">{o.pickupDate} · {o.pickupTime}</p>
-                                {o.garments && o.garments.length > 0 && (
-                                  <div className="flex gap-1 flex-wrap">{o.garments.slice(0, 3).map(g => <Badge key={g.id} variant="outline" className="text-[9px] rounded px-1.5 py-0">{g.type}</Badge>)}
-                                    {o.garments.length > 3 && <span className="text-[9px] text-slate-400">+{o.garments.length - 3}</span>}
+                                <JourneyTracker status={order.status} size="sm" showLabels={true} />
+                                {order.garments && order.garments.length > 0 && (
+                                  <div className="flex gap-1 mt-2 flex-wrap">
+                                    {order.garments.map(g => <span key={g.id} className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md">{g.type}{g.color ? ` ${g.color}` : ''} x{g.quantity}</span>)}
                                   </div>
                                 )}
-                              </CardContent>
-                            </Card>
-                          ))}
-                          {stepOrders.length === 0 && <p className="text-[10px] text-slate-300 text-center py-4">Vacío</p>}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </>
-            )}
+                              </div>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                    {sortedClients.length === 0 && <EmptyState icon={<Route className="h-10 w-10" />} msg="No hay pedidos para este filtro" />}
+                  </div>
+                </>
+              )
+            })()}
 
             {/* ══════════ ADMIN: PEDIDOS ══════════ */}
             {user.role === 'ADMIN' && activeTab === 'orders' && (
@@ -976,14 +1150,48 @@ export default function LaundryApp() {
             )}
 
             {/* ══════════ ADMIN: INVENTARIO ══════════ */}
-            {user.role === 'ADMIN' && activeTab === 'inventory' && (
-              <>
-                <SectionHeader title="Inventario" description={`${inventory.length} items registrados`} action={<Button size="sm" className="bg-emerald-500 hover:bg-emerald-600 text-white h-9" onClick={() => openInvModal()}><Plus className="h-3.5 w-3.5 mr-1.5" />Nuevo</Button>} />
-                {inventory.length === 0 ? (
-                  <Card className="border border-slate-200/60 bg-white"><CardContent><EmptyState icon={<Warehouse className="h-10 w-10" />} msg="Inventario vacío" /></CardContent></Card>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {inventory.map(item => (
+            {user.role === 'ADMIN' && activeTab === 'inventory' && (() => {
+              const filteredInv = invCategory === 'ALL' ? inventory : inventory.filter(i => i.category === invCategory)
+              const categories = ['ALL', ...new Set(inventory.map(i => i.category))]
+              const totalItems = inventory.length
+              const lowStock = inventory.filter(i => i.quantity <= i.minStock).length
+              const totalValue = inventory.reduce((a, i) => a + i.quantity * i.cost, 0)
+              const healthPct = totalItems > 0 ? Math.round(((totalItems - lowStock) / totalItems) * 100) : 100
+              const catTabs = categories.map(c => ({ key: c, label: c === 'ALL' ? 'Todos' : c, count: c === 'ALL' ? inventory.length : inventory.filter(i => i.category === c).length }))
+              return (
+                <>
+                  <SectionHeader title="Inventario" description={`${inventory.length} items registrados`} action={<Button size="sm" className="bg-emerald-500 hover:bg-emerald-600 text-white h-9" onClick={() => openInvModal()}><Plus className="h-3.5 w-3.5 mr-1.5" />Nuevo</Button>} />
+                  {/* Mini Dashboard */}
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    <Card className="border border-slate-200/60 bg-white">
+                      <CardContent className="p-4 text-center">
+                        <p className="text-2xl font-bold text-slate-900">{totalItems}</p>
+                        <p className="text-[10px] text-slate-400 uppercase tracking-wider font-medium mt-0.5">Items totales</p>
+                      </CardContent>
+                    </Card>
+                    <Card className="border border-slate-200/60 bg-white">
+                      <CardContent className="p-4 text-center">
+                        <p className="text-2xl font-bold text-emerald-600">{healthPct}%</p>
+                        <p className="text-[10px] text-slate-400 uppercase tracking-wider font-medium mt-0.5">Salud del inventario</p>
+                        <div className="h-1.5 bg-slate-100 rounded-full mt-2 overflow-hidden"><div className={`h-full rounded-full ${healthPct >= 80 ? 'bg-emerald-500' : healthPct >= 50 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${healthPct}%` }} /></div>
+                      </CardContent>
+                    </Card>
+                    <Card className="border border-slate-200/60 bg-white">
+                      <CardContent className="p-4 text-center">
+                        <p className="text-2xl font-bold text-red-600">{lowStock}</p>
+                        <p className="text-[10px] text-slate-400 uppercase tracking-wider font-medium mt-0.5">Stock bajo</p>
+                      </CardContent>
+                    </Card>
+                    <Card className="border border-slate-200/60 bg-white">
+                      <CardContent className="p-4 text-center">
+                        <p className="text-lg font-bold text-slate-900">{formatPrice(totalValue)}</p>
+                        <p className="text-[10px] text-slate-400 uppercase tracking-wider font-medium mt-0.5">Valor total</p>
+                      </CardContent>
+                    </Card>
+                  </div>
+                  <TabBar tabs={catTabs} value={invCategory} onChange={setInvCategory} />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-4">
+                    {filteredInv.map(item => (
                       <Card key={item.id} className={`border bg-white hover:shadow-md transition-shadow ${item.quantity <= item.minStock ? 'border-red-200' : 'border-slate-200/60'}`}>
                         <CardContent className="p-4 space-y-3">
                           <div className="flex items-start justify-between">
@@ -993,10 +1201,13 @@ export default function LaundryApp() {
                             </div>
                             {item.quantity <= item.minStock && <Badge className="bg-red-50 text-red-600 border-red-200 text-[10px] rounded-md">Bajo</Badge>}
                           </div>
-                          <div className="grid grid-cols-3 gap-2">
-                            <div><p className="text-[10px] text-slate-400 uppercase">Stock</p><p className="text-sm font-bold text-slate-900">{item.quantity} <span className="text-[10px] font-normal text-slate-400">{item.unit}</span></p></div>
-                            <div><p className="text-[10px] text-slate-400 uppercase">Mínimo</p><p className="text-sm text-slate-600">{item.minStock}</p></div>
-                            <div><p className="text-[10px] text-slate-400 uppercase">Costo</p><p className="text-sm text-slate-600">{formatPrice(item.cost)}</p></div>
+                          <div className="relative h-2 bg-slate-100 rounded-full overflow-hidden">
+                            <div className={`h-full rounded-full transition-all ${item.quantity <= item.minStock ? 'bg-red-400' : item.quantity <= item.minStock * 2 ? 'bg-amber-400' : 'bg-emerald-500'}`} style={{ width: `${Math.min(100, (item.quantity / Math.max(item.minStock * 3, 1)) * 100)}%` }} />
+                            <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold text-slate-600">{item.quantity}/{item.minStock * 3}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-slate-400">{item.quantity} {item.unit}</span>
+                            <span className="text-xs font-semibold text-slate-700">{formatPrice(item.cost)}/u</span>
                           </div>
                           <div className="flex items-center gap-1 pt-1 border-t border-slate-50">
                             <Button variant="ghost" size="sm" className="h-7 text-xs text-slate-400" onClick={() => openInvModal(item)}><Edit3 className="h-3 w-3 mr-1" />Editar</Button>
@@ -1006,9 +1217,10 @@ export default function LaundryApp() {
                       </Card>
                     ))}
                   </div>
-                )}
-              </>
-            )}
+                  {filteredInv.length === 0 && <EmptyState icon={<Warehouse className="h-10 w-10" />} msg="Sin items en esta categoría" />}
+                </>
+              )
+            })()}
 
             {/* ══════════ ADMIN: MATERIALES ══════════ */}
             {user.role === 'ADMIN' && activeTab === 'materials' && (
@@ -1055,50 +1267,135 @@ export default function LaundryApp() {
             )}
 
             {/* ══════════ ADMIN: ENTREGAS ══════════ */}
-            {user.role === 'ADMIN' && activeTab === 'deliveries' && (
-              <>
-                <SectionHeader title="Gestión de Entregas" description={`${deliveries.length} entregas registradas`} action={
-                  <Select value="" onValueChange={v => v && openDelModal(undefined, v)}>
-                    <SelectTrigger className="w-44 h-9 text-xs"><SelectValue placeholder="Nueva entrega..." /></SelectTrigger>
-                    <SelectContent>{orders.filter(o => o.status === 'LISTO' && !deliveries.find(d => d.orderId === o.id)).map(o => (
-                      <SelectItem key={o.id} value={o.id}>{o.clientName} — {SERVICE_LABELS[o.serviceType]}</SelectItem>
-                    ))}</SelectContent>
-                  </Select>
-                } />
-                {deliveries.length === 0 ? (
-                  <Card className="border border-slate-200/60 bg-white"><CardContent><EmptyState icon={<Truck className="h-10 w-10" />} msg="Sin entregas registradas" /></CardContent></Card>
-                ) : (
-                  <div className="space-y-3">
-                    {deliveries.map(d => (
-                      <Card key={d.id} className="border border-slate-200/60 bg-white hover:shadow-md transition-shadow">
-                        <CardContent className="p-4 space-y-3">
-                          <div className="flex items-start justify-between gap-3 flex-col sm:flex-row">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-semibold text-sm text-slate-900">{d.order?.clientName || 'N/A'}</span>
-                                <StatusBadge status={d.status} />
-                                {d.order && <Badge variant="secondary" className="text-[10px] rounded-md">{SERVICE_LABELS[d.order.serviceType]}</Badge>}
-                              </div>
-                              <p className="text-xs text-slate-400 mt-1">Conductor: {d.driverName || 'Sin asignar'}{d.address ? ` · ${d.address}` : ''}{d.deliveredAt ? ` · Entregado: ${fmtDate(d.deliveredAt)}` : ''}</p>
+            {user.role === 'ADMIN' && activeTab === 'deliveries' && (() => {
+              const weekDays = getWeekDays(deliveryWeekOffset)
+              const formatDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+              const isToday = (d: Date) => formatDate(d) === formatDate(new Date())
+              const weekLabel = `${weekDays[0].toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })} — ${weekDays[6].toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}`
+              // Group deliveries by date
+              const deliveriesByDate: Record<string, DeliveryData[]> = {}
+              ;[...deliveries, ...orders.filter(o => o.status === 'LISTO' && !deliveries.find(d => d.orderId === o.id)).map(o => ({
+                id: '', orderId: o.id, driverName: '', status: 'PENDIENTE', address: o.clientEmail || '',
+                deliveredAt: null, notes: '', order: { clientName: o.clientName, clientEmail: o.clientEmail, serviceType: o.serviceType, price: o.price },
+                createdAt: o.createdAt, updatedAt: o.updatedAt,
+              } as DeliveryData))].forEach(d => {
+                const date = d.deliveredAt ? formatDate(new Date(d.deliveredAt)) : 'PENDIENTE'
+                if (!deliveriesByDate[date]) deliveriesByDate[date] = []
+                deliveriesByDate[date].push(d)
+              })
+              // Orders ready for delivery
+              const readyOrders = orders.filter(o => o.status === 'LISTO' && !deliveries.find(d => d.orderId === o.id))
+              return (
+                <>
+                  <SectionHeader title="Gestión de Entregas" description={`${deliveries.length} entregas registradas`} action={
+                    <div className="flex gap-2">
+                      <Select value="" onValueChange={v => v && openDelModal(undefined, v)}>
+                        <SelectTrigger className="w-44 h-9 text-xs"><SelectValue placeholder="Nueva entrega..." /></SelectTrigger>
+                        <SelectContent>{readyOrders.map(o => (
+                          <SelectItem key={o.id} value={o.id}>{o.clientName} — {SERVICE_LABELS[o.serviceType]}</SelectItem>
+                        ))}</SelectContent>
+                      </Select>
+                    </div>
+                  } />
+                  {/* Week Calendar */}
+                  <Card className="border border-slate-200/60 bg-white overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+                      <button onClick={() => setDeliveryWeekOffset(w => w - 1)} className="p-1 rounded hover:bg-slate-100"><ChevronLeft className="h-4 w-4 text-slate-500" /></button>
+                      <div className="flex items-center gap-2">
+                        <CalendarDays className="h-4 w-4 text-slate-400" />
+                        <span className="text-sm font-semibold text-slate-900">{weekLabel}</span>
+                      </div>
+                      <button onClick={() => setDeliveryWeekOffset(w => w + 1)} className="p-1 rounded hover:bg-slate-100"><ChevronRight className="h-4 w-4 text-slate-500" /></button>
+                    </div>
+                    <div className="grid grid-cols-7">
+                      {weekDays.map((day, i) => {
+                        const dateStr = formatDate(day)
+                        const dayDeliveries = deliveries.filter(d => d.deliveredAt && formatDate(new Date(d.deliveredAt)) === dateStr)
+                        const today = isToday(day)
+                        return (
+                          <div key={i} className={`border-r border-slate-50 last:border-r-0 ${today ? 'bg-emerald-50/50' : ''}`}>
+                            <div className={`text-center py-2 border-b border-slate-50 ${today ? 'bg-emerald-500' : 'bg-slate-50/80'}`}>
+                              <p className="text-[9px] font-bold uppercase text-slate-400">{DAY_NAMES[i]}</p>
+                              <p className={`text-sm font-bold ${today ? 'text-white' : 'text-slate-700'}`}>{day.getDate()}</p>
                             </div>
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              {d.status !== 'ENTREGADO' && (() => { const next = getNextStatus(d.status, DELIVERY_FLOW); return next ? (
-                                <Button size="sm" variant="outline" onClick={() => changeDelStatus(d.id, next)} className="text-[11px] h-8 border-slate-200">
-                                  <ChevronRight className="h-3 w-3 mr-0.5" /> {STATUS_LABELS[next]}
-                                </Button>
-                              ) : null })()}
-                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openDelModal(d)}><Edit3 className="h-3.5 w-3.5 text-slate-400" /></Button>
-                              <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:text-red-600" onClick={() => deleteDel(d.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                            <div className="p-1.5 min-h-[80px] space-y-1">
+                              {dayDeliveries.map(d => (
+                                <div key={d.id} className={`text-[9px] px-1.5 py-1 rounded cursor-pointer truncate font-medium ${
+                                  d.status === 'ENTREGADO' ? 'bg-slate-100 text-slate-500' :
+                                  d.status === 'EN_CAMINO' ? 'bg-orange-100 text-orange-700' : 'bg-emerald-100 text-emerald-700'
+                                }`} title={`${d.order?.clientName} — ${STATUS_LABELS[d.status]}`}>
+                                  {d.order?.clientName?.split(' ')[0] || 'N/A'}
+                                </div>
+                              ))}
                             </div>
                           </div>
-                          <JourneyTracker status={d.status === 'ENTREGADO' ? 'ENTREGADO' : d.status === 'EN_CAMINO' ? 'LISTO' : d.status === 'ASIGNADA' ? 'RECOGIDO' : 'PENDIENTE'} size="sm" showLabels={false} />
-                        </CardContent>
-                      </Card>
-                    ))}
+                        )
+                      })}
+                    </div>
+                  </Card>
+                  {/* Delivery Journey Blocks by client */}
+                  <div className="space-y-4 mt-2">
+                    {(() => {
+                      const clientDeliveries: Record<string, DeliveryData[]> = {}
+                      deliveries.forEach(d => {
+                        const name = d.order?.clientName || 'Sin cliente'
+                        if (!clientDeliveries[name]) clientDeliveries[name] = []
+                        clientDeliveries[name].push(d)
+                      })
+                      return Object.entries(clientDeliveries).sort((a, b) => {
+                        const aActive = a[1].filter(d => d.status !== 'ENTREGADO').length
+                        const bActive = b[1].filter(d => d.status !== 'ENTREGADO').length
+                        return bActive - aActive
+                      }).map(([client, dels]) => (
+                        <Card key={client} className="border border-slate-200/60 bg-white overflow-hidden">
+                          <div className="px-4 py-3 bg-slate-50/80 border-b border-slate-100 flex items-center gap-3">
+                            <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${
+                              dels.some(d => d.status === 'EN_CAMINO') ? 'bg-orange-500 text-white' :
+                              dels.some(d => d.status === 'ENTREGADO') ? 'bg-emerald-500 text-white' : 'bg-sky-500 text-white'
+                            }`}>{client.charAt(0)}</div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-slate-900">{client}</p>
+                              <p className="text-[11px] text-slate-400">{dels.length} entrega{dels.length !== 1 ? 's' : ''} · {dels.filter(d => d.status !== 'ENTREGADO').length} pendiente{dels.filter(d => d.status !== 'ENTREGADO').length !== 1 ? 's' : ''}</p>
+                            </div>
+                          </div>
+                          <CardContent className="p-0">
+                            <div className="divide-y divide-slate-50">
+                              {dels.map(d => {
+                                const delStatus = d.status === 'ENTREGADO' ? 'ENTREGADO' : d.status === 'EN_CAMINO' ? 'LISTO' : d.status === 'ASIGNADA' ? 'RECOGIDO' : 'PENDIENTE'
+                                return (
+                                  <div key={d.id} className="px-4 py-3 hover:bg-slate-50/50 transition-colors">
+                                    <div className="flex items-center justify-between gap-3 mb-2">
+                                      <div className="flex items-center gap-2">
+                                        <Badge variant="secondary" className="text-[10px] rounded-md">{d.order?.serviceType || 'N/A'}</Badge>
+                                        <StatusBadge status={d.status} />
+                                        <span className="text-[11px] text-slate-400">{d.driverName || 'Sin conductor'}</span>
+                                      </div>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-xs font-bold text-slate-900">{d.order ? formatPrice(d.order.price) : ''}</span>
+                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openDelModal(d)}><Edit3 className="h-3 w-3 text-slate-400" /></Button>
+                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-600" onClick={() => deleteDel(d.id)}><Trash2 className="h-3 w-3" /></Button>
+                                      </div>
+                                    </div>
+                                    <JourneyTracker status={delStatus} size="sm" showLabels={true} />
+                                    {d.address && <p className="text-[10px] text-slate-400 mt-1.5 flex items-center gap-1"><MapPin className="h-3 w-3" />{d.address}</p>}
+                                    {d.status !== 'ENTREGADO' && (() => { const next = getNextStatus(d.status, DELIVERY_FLOW); return next ? (
+                                      <Button size="sm" variant="outline" onClick={() => changeDelStatus(d.id, next)} className="text-[11px] h-8 border-slate-200 mt-2">
+                                        <ChevronRight className="h-3 w-3 mr-0.5" /> {STATUS_LABELS[next]}
+                                      </Button>
+                                    ) : null })()}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))
+                    })()}
                   </div>
-                )}
-              </>
-            )}
+                  {deliveries.length === 0 && readyOrders.length === 0 && <EmptyState icon={<Truck className="h-10 w-10" />} msg="Sin entregas registradas" />}
+                </>
+              )
+            })()}
 
           </div>
         </main>
