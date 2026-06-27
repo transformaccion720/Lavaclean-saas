@@ -1,0 +1,87 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  role      String
+  phone     String   @default("")
+  address   String   @default("")
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Order {
+  id          String    @id @default(cuid())
+  clientName  String
+  clientEmail String
+  serviceType String
+  status      String    @default("PENDIENTE")
+  pickupDate  String
+  pickupTime  String
+  price       Float     @default(0)
+  notes       String    @default("")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  garments    Garment[]
+  delivery    Delivery?
+}
+
+model Garment {
+  id          String   @id @default(cuid())
+  orderId     String
+  type        String
+  description String   @default("")
+  color       String   @default("")
+  brand       String   @default("")
+  quantity    Int      @default(1)
+  status      String   @default("RECIBIDA")
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Inventory {
+  id        String   @id @default(cuid())
+  name      String
+  category  String   @default("GENERAL")
+  quantity  Int      @default(0)
+  unit      String   @default("unidad")
+  minStock  Int      @default(5)
+  cost      Float    @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Material {
+  id          String   @id @default(cuid())
+  name        String
+  category    String   @default("QUIMICO")
+  quantity    Float    @default(0)
+  unit        String   @default("litro")
+  costPerUnit Float    @default(0)
+  supplier    String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Delivery {
+  id          String    @id @default(cuid())
+  orderId     String    @unique
+  driverName  String    @default("")
+  status      String    @default("PENDIENTE")
+  address     String    @default("")
+  deliveredAt DateTime?
+  notes       String    @default("")
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}

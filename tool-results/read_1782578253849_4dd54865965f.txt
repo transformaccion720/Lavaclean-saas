@@ -1,0 +1,814 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback } from 'react'
+     4→import { io, Socket } from 'socket.io-client'
+     5→import { Button } from '@/components/ui/button'
+     6→import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+     7→import { Input } from '@/components/ui/input'
+     8→import { Label } from '@/components/ui/label'
+     9→import { Badge } from '@/components/ui/badge'
+    10→import { ScrollArea } from '@/components/ui/scroll-area'
+    11→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+    12→import { Textarea } from '@/components/ui/textarea'
+    13→import { Toaster, toast } from 'sonner'
+    14→import {
+    15→  Shirt,
+    16→  Clock,
+    17→  DollarSign,
+    18→  Package,
+    19→  PackageCheck,
+    20→  Truck,
+    21→  CheckCircle2,
+    22→  LogOut,
+    23→  User,
+    24→  RefreshCw,
+    25→  Star,
+    26→  TrendingUp,
+    27→  AlertCircle,
+    28→} from 'lucide-react'
+    29→
+    30→/* ────────── Types ────────── */
+    31→interface User {
+    32→  id: string
+    33→  name: string
+    34→  email: string
+    35→  role: string
+    36→}
+    37→
+    38→interface Order {
+    39→  id: string
+    40→  clientName: string
+    41→  clientEmail: string
+    42→  serviceType: string
+    43→  status: string
+    44→  pickupDate: string
+    45→  pickupTime: string
+    46→  price: number
+    47→  notes: string
+    48→  createdAt: string
+    49→  updatedAt: string
+    50→}
+    51→
+    52→interface Stats {
+    53→  totalOrders: number
+    54→  todayOrders: number
+    55→  totalRevenue: number
+    56→  todayRevenue: number
+    57→  statusCounts: Record<string, number>
+    58→}
+    59→
+    60→/* ────────── Constants ────────── */
+    61→const STATUS_LABELS: Record<string, string> = {
+    62→  PENDIENTE: 'Pendiente',
+    63→  RECOGIDO: 'Recogido',
+    64→  EN_LAVADO: 'En lavado',
+    65→  LISTO: 'Listo para entregar',
+    66→  ENTREGADO: 'Entregado',
+    67→}
+    68→
+    69→const STATUS_COLORS: Record<string, string> = {
+    70→  PENDIENTE: 'bg-yellow-100 text-yellow-800 border-yellow-300',
+    71→  RECOGIDO: 'bg-blue-100 text-blue-800 border-blue-300',
+    72→  EN_LAVADO: 'bg-purple-100 text-purple-800 border-purple-300',
+    73→  LISTO: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+    74→  ENTREGADO: 'bg-gray-100 text-gray-800 border-gray-300',
+    75→}
+    76→
+    77→const STATUS_ICONS: Record<string, React.ReactNode> = {
+    78→  PENDIENTE: <Clock className="h-4 w-4" />,
+    79→  RECOGIDO: <Truck className="h-4 w-4" />,
+    80→  EN_LAVADO: <RefreshCw className="h-4 w-4" />,
+    81→  LISTO: <PackageCheck className="h-4 w-4" />,
+    82→  ENTREGADO: <CheckCircle2 className="h-4 w-4" />,
+    83→}
+    84→
+    85→const SERVICE_LABELS: Record<string, string> = {
+    86→  LAVADO: 'Lavado',
+    87→  SECADO: 'Secado',
+    88→  PLANCHADO: 'Planchado',
+    89→  COMPLETO: 'Completo',
+    90→}
+    91→
+    92→const STATUS_FLOW = ['PENDIENTE', 'RECOGIDO', 'EN_LAVADO', 'LISTO', 'ENTREGADO']
+    93→
+    94→const formatPrice = (n: number) =>
+    95→  new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(n)
+    96→
+    97→/* ────────── Main Component ────────── */
+    98→export default function LaundryApp() {
+    99→  const [user, setUser] = useState<User | null>(null)
+   100→  const [orders, setOrders] = useState<Order[]>([])
+   101→  const [stats, setStats] = useState<Stats | null>(null)
+   102→  const [socket, setSocket] = useState<Socket | null>(null)
+   103→  const [loading, setLoading] = useState(false)
+   104→
+   105→  // Login form
+   106→  const [loginEmail, setLoginEmail] = useState('')
+   107→  const [loginPassword, setLoginPassword] = useState('')
+   108→
+   109→  // New order form
+   110→  const [formService, setFormService] = useState('')
+   111→  const [formDate, setFormDate] = useState('')
+   112→  const [formTime, setFormTime] = useState('')
+   113→  const [formNotes, setFormNotes] = useState('')
+   114→
+   115→  const fetchOrders = useCallback(async (email?: string) => {
+   116→    try {
+   117→      const url = email ? `/api/orders?clientEmail=${email}` : '/api/orders'
+   118→      const res = await fetch(url)
+   119→      const data = await res.json()
+   120→      setOrders(data)
+   121→    } catch (e) {
+   122→      console.error('Fetch orders error:', e)
+   123→    }
+   124→  }, [])
+   125→
+   126→  const fetchStats = useCallback(async () => {
+   127→    try {
+   128→      const res = await fetch('/api/stats')
+   129→      const data = await res.json()
+   130→      setStats(data)
+   131→    } catch (e) {
+   132→      console.error('Fetch stats error:', e)
+   133→    }
+   134→  }, [])
+   135→
+   136→  // Socket setup
+   137→  useEffect(() => {
+   138→    const s = io('/?XTransformPort=3004', {
+   139→      transports: ['websocket', 'polling'],
+   140→      forceNew: true,
+   141→      reconnection: true,
+   142→      reconnectionAttempts: 10,
+   143→      reconnectionDelay: 1000,
+   144→    })
+   145→    setSocket(s)
+   146→
+   147→    s.on('order-updated', (data: { action: string; order: Order }) => {
+   148→      setOrders((prev) => {
+   149→        const idx = prev.findIndex((o) => o.id === data.order.id)
+   150→        if (idx >= 0) {
+   151→          const updated = [...prev]
+   152→          updated[idx] = data.order
+   153→          return updated
+   154→        }
+   155→        if (data.action === 'created') return [data.order, ...prev]
+   156→        return prev
+   157→      })
+   158→      fetchStats()
+   159→      toast.success(
+   160→        data.action === 'created' ? 'Nuevo pedido creado' : 'Estado actualizado'
+   161→      )
+   162→    })
+   163→
+   164→    return () => {
+   165→      s.disconnect()
+   166→    }
+   167→  }, [fetchStats])
+   168→
+   169→  // Login handler
+   170→  const handleLogin = async () => {
+   171→    if (!loginEmail.trim() || !loginPassword.trim()) return
+   172→    setLoading(true)
+   173→    try {
+   174→      const res = await fetch('/api/login', {
+   175→        method: 'POST',
+   176→        headers: { 'Content-Type': 'application/json' },
+   177→        body: JSON.stringify({ email: loginEmail, password: loginPassword }),
+   178→      })
+   179→      const data = await res.json()
+   180→      if (!res.ok) {
+   181→        toast.error(data.error || 'Error al iniciar sesión')
+   182→        return
+   183→      }
+   184→      setUser(data)
+   185→      socket?.emit('join-role', data.role)
+   186→      if (data.role === 'CLIENT') {
+   187→        fetchOrders(data.email)
+   188→      } else {
+   189→        fetchOrders()
+   190→      }
+   191→      if (data.role === 'ADMIN') fetchStats()
+   192→    } catch {
+   193→      toast.error('Error de conexión')
+   194→    } finally {
+   195→      setLoading(false)
+   196→    }
+   197→  }
+   198→
+   199→  // Create order
+   200→  const handleCreateOrder = async () => {
+   201→    if (!user || !formService || !formDate || !formTime) {
+   202→      toast.error('Completa todos los campos requeridos')
+   203→      return
+   204→    }
+   205→    setLoading(true)
+   206→    try {
+   207→      const res = await fetch('/api/orders', {
+   208→        method: 'POST',
+   209→        headers: { 'Content-Type': 'application/json' },
+   210→        body: JSON.stringify({
+   211→          clientName: user.name,
+   212→          clientEmail: user.email,
+   213→          serviceType: formService,
+   214→          pickupDate: formDate,
+   215→          pickupTime: formTime,
+   216→          notes: formNotes,
+   217→        }),
+   218→      })
+   219→      const data = await res.json()
+   220→      if (res.ok) {
+   221→        socket?.emit('order-created', data)
+   222→        setFormService('')
+   223→        setFormDate('')
+   224→        setFormTime('')
+   225→        setFormNotes('')
+   226→        fetchOrders(user.email)
+   227→        toast.success('Pedido creado exitosamente')
+   228→      }
+   229→    } catch {
+   230→      toast.error('Error al crear pedido')
+   231→    } finally {
+   232→      setLoading(false)
+   233→    }
+   234→  }
+   235→
+   236→  // Change status (worker)
+   237→  const handleChangeStatus = async (orderId: string, newStatus: string) => {
+   238→    setLoading(true)
+   239→    try {
+   240→      const res = await fetch('/api/orders', {
+   241→        method: 'PATCH',
+   242→        headers: { 'Content-Type': 'application/json' },
+   243→        body: JSON.stringify({ id: orderId, status: newStatus }),
+   244→      })
+   245→      const data = await res.json()
+   246→      if (res.ok) {
+   247→        socket?.emit('order-status-changed', data)
+   248→        fetchOrders()
+   249→      }
+   250→    } catch {
+   251→      toast.error('Error al cambiar estado')
+   252→    } finally {
+   253→      setLoading(false)
+   254→    }
+   255→  }
+   256→
+   257→  const getNextStatus = (current: string): string | null => {
+   258→    const idx = STATUS_FLOW.indexOf(current)
+   259→    if (idx >= 0 && idx < STATUS_FLOW.length - 1) return STATUS_FLOW[idx + 1]
+   260→    return null
+   261→  }
+   262→
+   263→  const logout = () => {
+   264→    setUser(null)
+   265→    setOrders([])
+   266→    setStats(null)
+   267→    setLoginEmail('')
+   268→    setLoginPassword('')
+   269→  }
+   270→
+   271→  /* ────────── LOGIN SCREEN ────────── */
+   272→  if (!user) {
+   273→    return (
+   274→      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 p-4">
+   275→        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+   276→          <div className="absolute -top-40 -right-40 w-80 h-80 bg-emerald-200/30 rounded-full blur-3xl" />
+   277→          <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-teal-200/30 rounded-full blur-3xl" />
+   278→        </div>
+   279→        <Card className="w-full max-w-md relative z-10 shadow-xl border-0">
+   280→          <CardHeader className="text-center pb-2">
+   281→            <div className="mx-auto w-16 h-16 bg-emerald-100 rounded-2xl flex items-center justify-center mb-4">
+   282→              <Shirt className="h-8 w-8 text-emerald-600" />
+   283→            </div>
+   284→            <CardTitle className="text-2xl font-bold tracking-tight">LavaClean SaaS</CardTitle>
+   285→            <CardDescription>Inicia sesión para continuar</CardDescription>
+   286→          </CardHeader>
+   287→          <CardContent className="space-y-4 pt-2">
+   288→            <div className="space-y-2">
+   289→              <Label htmlFor="email">Correo electrónico</Label>
+   290→              <Input
+   291→                id="email"
+   292→                type="email"
+   293→                placeholder="tu@correo.com"
+   294→                value={loginEmail}
+   295→                onChange={(e) => setLoginEmail(e.target.value)}
+   296→                onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+   297→              />
+   298→            </div>
+   299→            <div className="space-y-2">
+   300→              <Label htmlFor="password">Contraseña</Label>
+   301→              <Input
+   302→                id="password"
+   303→                type="password"
+   304→                placeholder="••••"
+   305→                value={loginPassword}
+   306→                onChange={(e) => setLoginPassword(e.target.value)}
+   307→                onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+   308→              />
+   309→            </div>
+   310→            <Button onClick={handleLogin} disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-700">
+   311→              {loading ? 'Ingresando...' : 'Iniciar sesión'}
+   312→            </Button>
+   313→
+   314→            <div className="pt-2 border-t">
+   315→              <p className="text-xs text-muted-foreground text-center mb-3">Cuentas de prueba:</p>
+   316→              <div className="grid gap-2">
+   317→                {[
+   318→                  { email: 'cliente@lavanderia.com', role: 'Cliente', color: 'text-teal-600' },
+   319→                  { email: 'admin@lavanderia.com', role: 'Administrador', color: 'text-amber-600' },
+   320→                  { email: 'operario@lavanderia.com', role: 'Operario', color: 'text-violet-600' },
+   321→                ].map((acc) => (
+   322→                  <button
+   323→                    key={acc.email}
+   324→                    onClick={() => { setLoginEmail(acc.email); setLoginPassword('1234') }}
+   325→                    className="flex items-center justify-between px-3 py-2 rounded-lg border hover:bg-muted/50 transition-colors text-left"
+   326→                  >
+   327→                    <div className="flex items-center gap-2">
+   328→                      <User className="h-4 w-4 text-muted-foreground" />
+   329→                      <span className="text-sm">{acc.role}</span>
+   330→                    </div>
+   331→                    <span className="text-xs text-muted-foreground">{acc.email}</span>
+   332→                  </button>
+   333→                ))}
+   334→              </div>
+   335→              <p className="text-xs text-muted-foreground text-center mt-2">Contraseña: 1234</p>
+   336→            </div>
+   337→          </CardContent>
+   338→        </Card>
+   339→        <Toaster position="top-center" />
+   340→      </div>
+   341→    )
+   342→  }
+   343→
+   344→  /* ────────── ROLE HEADER ────────── */
+   345→  const roleLabel =
+   346→    user.role === 'CLIENT' ? 'Cliente' : user.role === 'ADMIN' ? 'Administrador' : 'Operario'
+   347→  const roleColor =
+   348→    user.role === 'CLIENT'
+   349→      ? 'bg-teal-100 text-teal-700'
+   350→      : user.role === 'ADMIN'
+   351→      ? 'bg-amber-100 text-amber-700'
+   352→      : 'bg-violet-100 text-violet-700'
+   353→
+   354→  /* ────────── CLIENT SCREEN ────────── */
+   355→  if (user.role === 'CLIENT') {
+   356→    return (
+   357→      <div className="min-h-screen flex flex-col bg-gradient-to-br from-slate-50 to-slate-100">
+   358→        <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b">
+   359→          <div className="max-w-5xl mx-auto flex items-center justify-between px-4 h-14">
+   360→            <div className="flex items-center gap-2">
+   361→              <Shirt className="h-5 w-5 text-emerald-600" />
+   362→              <span className="font-bold text-lg">LavaClean</span>
+   363→              <Badge className={roleColor}>{roleLabel}</Badge>
+   364→            </div>
+   365→            <Button variant="ghost" size="sm" onClick={logout}>
+   366→              <LogOut className="h-4 w-4 mr-1" /> Salir
+   367→            </Button>
+   368→          </div>
+   369→        </header>
+   370→
+   371→        <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-6 space-y-6">
+   372→          <h1 className="text-2xl font-bold">Hola, {user.name.split(' ')[0]} 👋</h1>
+   373→
+   374→          {/* New Order Form */}
+   375→          <Card className="border-0 shadow-md">
+   376→            <CardHeader>
+   377→              <CardTitle className="text-lg flex items-center gap-2">
+   378→                <Package className="h-5 w-5 text-emerald-600" />
+   379→                Solicitar recogida
+   380→              </CardTitle>
+   381→              <CardDescription>Completa los datos para pedir tu servicio de lavandería</CardDescription>
+   382→            </CardHeader>
+   383→            <CardContent>
+   384→              <div className="grid sm:grid-cols-2 gap-4">
+   385→                <div className="space-y-2">
+   386→                  <Label>Tipo de servicio *</Label>
+   387→                  <Select value={formService} onValueChange={setFormService}>
+   388→                    <SelectTrigger><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
+   389→                    <SelectContent>
+   390→                      <SelectItem value="LAVADO">Lavado — {formatPrice(15000)}</SelectItem>
+   391→                      <SelectItem value="SECADO">Secado — {formatPrice(10000)}</SelectItem>
+   392→                      <SelectItem value="PLANCHADO">Planchado — {formatPrice(12000)}</SelectItem>
+   393→                      <SelectItem value="COMPLETO">Completo — {formatPrice(30000)}</SelectItem>
+   394→                    </SelectContent>
+   395→                  </Select>
+   396→                </div>
+   397→                <div className="space-y-2">
+   398→                  <Label>Fecha de recogida *</Label>
+   399→                  <Input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} />
+   400→                </div>
+   401→                <div className="space-y-2">
+   402→                  <Label>Hora de recogida *</Label>
+   403→                  <Input type="time" value={formTime} onChange={(e) => setFormTime(e.target.value)} />
+   404→                </div>
+   405→                <div className="space-y-2">
+   406→                  <Label>Notas adicionales</Label>
+   407→                  <Textarea
+   408→                    placeholder="Instrucciones especiales..."
+   409→                    value={formNotes}
+   410→                    onChange={(e) => setFormNotes(e.target.value)}
+   411→                  />
+   412→                </div>
+   413→              </div>
+   414→              <Button
+   415→                onClick={handleCreateOrder}
+   416→                disabled={loading || !formService || !formDate || !formTime}
+   417→                className="w-full mt-4 bg-emerald-600 hover:bg-emerald-700"
+   418→              >
+   419→                Crear pedido
+   420→              </Button>
+   421→            </CardContent>
+   422→          </Card>
+   423→
+   424→          {/* My Orders */}
+   425→          <Card className="border-0 shadow-md">
+   426→            <CardHeader>
+   427→              <CardTitle className="text-lg flex items-center gap-2">
+   428→                <Clock className="h-5 w-5 text-emerald-600" />
+   429→                Mis pedidos
+   430→              </CardTitle>
+   431→              <CardDescription>Sigue el estado de tus pedidos en tiempo real</CardDescription>
+   432→            </CardHeader>
+   433→            <CardContent>
+   434→              {orders.length === 0 ? (
+   435→                <div className="text-center py-10 text-muted-foreground">
+   436→                  <Package className="h-10 w-10 mx-auto mb-2 opacity-40" />
+   437→                  <p>No tienes pedidos aún</p>
+   438→                </div>
+   439→              ) : (
+   440→                <ScrollArea className="max-h-96">
+   441→                  <div className="space-y-3">
+   442→                    {orders.map((order) => (
+   443→                      <div
+   444→                        key={order.id}
+   445→                        className="flex items-start sm:items-center justify-between p-4 rounded-xl border bg-white gap-3 flex-col sm:flex-row"
+   446→                      >
+   447→                        <div className="flex-1 min-w-0">
+   448→                          <div className="flex items-center gap-2 mb-1">
+   449→                            <span className="font-semibold text-sm">{SERVICE_LABELS[order.serviceType]}</span>
+   450→                            <Badge variant="outline" className={STATUS_COLORS[order.status]}>
+   451→                              {STATUS_ICONS[order.status]}
+   452→                              <span className="ml-1">{STATUS_LABELS[order.status]}</span>
+   453→                            </Badge>
+   454→                          </div>
+   455→                          <p className="text-xs text-muted-foreground">
+   456→                            {order.pickupDate} a las {order.pickupTime} · {formatPrice(order.price)}
+   457→                          </p>
+   458→                          {order.notes && (
+   459→                            <p className="text-xs text-muted-foreground mt-1 italic">"{order.notes}"</p>
+   460→                          )}
+   461→                        </div>
+   462→                        {/* Status progress bar */}
+   463→                        <div className="flex items-center gap-1 w-full sm:w-auto">
+   464→                          {STATUS_FLOW.map((s, i) => (
+   465→                            <div key={s} className="flex items-center gap-1">
+   466→                              <div
+   467→                                className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${
+   468→                                  STATUS_FLOW.indexOf(order.status) >= i
+   469→                                    ? 'bg-emerald-500 text-white'
+   470→                                    : 'bg-muted text-muted-foreground'
+   471→                                }`}
+   472→                              >
+   473→                                {i + 1}
+   474→                              </div>
+   475→                              {i < STATUS_FLOW.length - 1 && (
+   476→                                <div
+   477→                                  className={`h-0.5 w-4 sm:w-6 ${
+   478→                                    STATUS_FLOW.indexOf(order.status) > i
+   479→                                      ? 'bg-emerald-500'
+   480→                                      : 'bg-muted'
+   481→                                  }`}
+   482→                                />
+   483→                              )}
+   484→                            </div>
+   485→                          ))}
+   486→                        </div>
+   487→                      </div>
+   488→                    ))}
+   489→                  </div>
+   490→                </ScrollArea>
+   491→              )}
+   492→            </CardContent>
+   493→          </Card>
+   494→        </main>
+   495→        <Toaster position="top-center" />
+   496→      </div>
+   497→    )
+   498→  }
+   499→
+   500→  /* ────────── ADMIN SCREEN ────────── */
+   501→  if (user.role === 'ADMIN') {
+   502→    return (
+   503→      <div className="min-h-screen flex flex-col bg-gradient-to-br from-slate-50 to-slate-100">
+   504→        <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b">
+   505→          <div className="max-w-6xl mx-auto flex items-center justify-between px-4 h-14">
+   506→            <div className="flex items-center gap-2">
+   507→              <Shirt className="h-5 w-5 text-emerald-600" />
+   508→              <span className="font-bold text-lg">LavaClean</span>
+   509→              <Badge className={roleColor}>{roleLabel}</Badge>
+   510→            </div>
+   511→            <Button variant="ghost" size="sm" onClick={logout}>
+   512→              <LogOut className="h-4 w-4 mr-1" /> Salir
+   513→            </Button>
+   514→          </div>
+   515→        </header>
+   516→
+   517→        <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-6 space-y-6">
+   518→          <div className="flex items-center justify-between">
+   519→            <h1 className="text-2xl font-bold">Panel de Control</h1>
+   520→            <Button variant="outline" size="sm" onClick={() => { fetchOrders(); fetchStats() }}>
+   521→              <RefreshCw className="h-4 w-4 mr-1" /> Actualizar
+   522→            </Button>
+   523→          </div>
+   524→
+   525→          {/* Stats Cards */}
+   526→          {stats && (
+   527→            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+   528→              <Card className="border-0 shadow-md">
+   529→                <CardContent className="p-4">
+   530→                  <div className="flex items-center gap-3">
+   531→                    <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center">
+   532→                      <DollarSign className="h-5 w-5 text-amber-600" />
+   533→                    </div>
+   534→                    <div>
+   535→                      <p className="text-xs text-muted-foreground">Ingresos hoy</p>
+   536→                      <p className="text-lg font-bold">{formatPrice(stats.todayRevenue)}</p>
+   537→                    </div>
+   538→                  </div>
+   539→                </CardContent>
+   540→              </Card>
+   541→              <Card className="border-0 shadow-md">
+   542→                <CardContent className="p-4">
+   543→                  <div className="flex items-center gap-3">
+   544→                    <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
+   545→                      <TrendingUp className="h-5 w-5 text-emerald-600" />
+   546→                    </div>
+   547→                    <div>
+   548→                      <p className="text-xs text-muted-foreground">Ingresos totales</p>
+   549→                      <p className="text-lg font-bold">{formatPrice(stats.totalRevenue)}</p>
+   550→                    </div>
+   551→                  </div>
+   552→                </CardContent>
+   553→              </Card>
+   554→              <Card className="border-0 shadow-md">
+   555→                <CardContent className="p-4">
+   556→                  <div className="flex items-center gap-3">
+   557→                    <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
+   558→                      <Package className="h-5 w-5 text-blue-600" />
+   559→                    </div>
+   560→                    <div>
+   561→                      <p className="text-xs text-muted-foreground">Pedidos hoy</p>
+   562→                      <p className="text-lg font-bold">{stats.todayOrders}</p>
+   563→                    </div>
+   564→                  </div>
+   565→                </CardContent>
+   566→              </Card>
+   567→              <Card className="border-0 shadow-md">
+   568→                <CardContent className="p-4">
+   569→                  <div className="flex items-center gap-3">
+   570→                    <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center">
+   571→                      <Star className="h-5 w-5 text-violet-600" />
+   572→                    </div>
+   573→                    <div>
+   574→                      <p className="text-xs text-muted-foreground">Total pedidos</p>
+   575→                      <p className="text-lg font-bold">{stats.totalOrders}</p>
+   576→                    </div>
+   577→                  </div>
+   578→                </CardContent>
+   579→              </Card>
+   580→            </div>
+   581→          )}
+   582→
+   583→          {/* Status breakdown */}
+   584→          {stats && (
+   585→            <Card className="border-0 shadow-md">
+   586→              <CardHeader className="pb-2">
+   587→                <CardTitle className="text-base">Distribución por estado</CardTitle>
+   588→              </CardHeader>
+   589→              <CardContent>
+   590→                <div className="flex flex-wrap gap-2">
+   591→                  {STATUS_FLOW.map((s) => (
+   592→                    <Badge key={s} variant="outline" className={`${STATUS_COLORS[s]} px-3 py-1 text-sm`}>
+   593→                      {STATUS_ICONS[s]}
+   594→                      <span className="ml-1">{STATUS_LABELS[s]}: {stats.statusCounts[s] || 0}</span>
+   595→                    </Badge>
+   596→                  ))}
+   597→                </div>
+   598→              </CardContent>
+   599→            </Card>
+   600→          )}
+   601→
+   602→          {/* All Orders Table */}
+   603→          <Card className="border-0 shadow-md">
+   604→            <CardHeader>
+   605→              <CardTitle className="text-lg flex items-center gap-2">
+   606→                <Package className="h-5 w-5 text-emerald-600" />
+   607→                Todas las órdenes
+   608→              </CardTitle>
+   609→              <CardDescription>Se actualizan automáticamente en tiempo real</CardDescription>
+   610→            </CardHeader>
+   611→            <CardContent>
+   612→              {orders.length === 0 ? (
+   613→                <div className="text-center py-10 text-muted-foreground">
+   614→                  <AlertCircle className="h-10 w-10 mx-auto mb-2 opacity-40" />
+   615→                  <p>No hay pedidos registrados</p>
+   616→                </div>
+   617→              ) : (
+   618→                <ScrollArea className="max-h-[400px]">
+   619→                  <div className="space-y-2">
+   620→                    {orders.map((order) => (
+   621→                      <div
+   622→                        key={order.id}
+   623→                        className="flex items-center justify-between p-3 rounded-xl border bg-white gap-3 flex-col sm:flex-row"
+   624→                      >
+   625→                        <div className="flex-1 min-w-0">
+   626→                          <div className="flex items-center gap-2 flex-wrap">
+   627→                            <span className="font-semibold text-sm">{order.clientName}</span>
+   628→                            <Badge variant="outline" className={STATUS_COLORS[order.status]}>
+   629→                              {STATUS_ICONS[order.status]}
+   630→                              <span className="ml-1">{STATUS_LABELS[order.status]}</span>
+   631→                            </Badge>
+   632→                            <Badge variant="secondary">{SERVICE_LABELS[order.serviceType]}</Badge>
+   633→                          </div>
+   634→                          <p className="text-xs text-muted-foreground mt-1">
+   635→                            {order.pickupDate} · {order.pickupTime} · {formatPrice(order.price)}
+   636→                          </p>
+   637→                        </div>
+   638→                        <span className="text-sm font-bold text-emerald-600 whitespace-nowrap">
+   639→                          {formatPrice(order.price)}
+   640→                        </span>
+   641→                      </div>
+   642→                    ))}
+   643→                  </div>
+   644→                </ScrollArea>
+   645→              )}
+   646→            </CardContent>
+   647→          </Card>
+   648→        </main>
+   649→        <Toaster position="top-center" />
+   650→      </div>
+   651→    )
+   652→  }
+   653→
+   654→  /* ────────── WORKER SCREEN ────────── */
+   655→  if (user.role === 'WORKER') {
+   656→    const activeOrders = orders.filter((o) => o.status !== 'ENTREGADO')
+   657→    const completedOrders = orders.filter((o) => o.status === 'ENTREGADO')
+   658→
+   659→    return (
+   660→      <div className="min-h-screen flex flex-col bg-gradient-to-br from-slate-50 to-slate-100">
+   661→        <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b">
+   662→          <div className="max-w-5xl mx-auto flex items-center justify-between px-4 h-14">
+   663→            <div className="flex items-center gap-2">
+   664→              <Shirt className="h-5 w-5 text-emerald-600" />
+   665→              <span className="font-bold text-lg">LavaClean</span>
+   666→              <Badge className={roleColor}>{roleLabel}</Badge>
+   667→            </div>
+   668→            <Button variant="ghost" size="sm" onClick={logout}>
+   669→              <LogOut className="h-4 w-4 mr-1" /> Salir
+   670→            </Button>
+   671→          </div>
+   672→        </header>
+   673→
+   674→        <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-6 space-y-6">
+   675→          <div className="flex items-center justify-between">
+   676→            <h1 className="text-2xl font-bold">Órdenes de trabajo</h1>
+   677→            <Button variant="outline" size="sm" onClick={() => fetchOrders()}>
+   678→              <RefreshCw className="h-4 w-4 mr-1" /> Actualizar
+   679→            </Button>
+   680→          </div>
+   681→
+   682→          {/* Active orders */}
+   683→          <Card className="border-0 shadow-md">
+   684→            <CardHeader>
+   685→              <CardTitle className="text-lg flex items-center gap-2">
+   686→                <RefreshCw className="h-5 w-5 text-violet-600" />
+   687→                Activas ({activeOrders.length})
+   688→              </CardTitle>
+   689→              <CardDescription>Haz clic en el botón para avanzar al siguiente estado</CardDescription>
+   690→            </CardHeader>
+   691→            <CardContent>
+   692→              {activeOrders.length === 0 ? (
+   693→                <div className="text-center py-10 text-muted-foreground">
+   694→                  <CheckCircle2 className="h-10 w-10 mx-auto mb-2 opacity-40" />
+   695→                  <p>Todas las órdenes están completadas</p>
+   696→                </div>
+   697→              ) : (
+   698→                <ScrollArea className="max-h-[500px]">
+   699→                  <div className="space-y-3">
+   700→                    {activeOrders.map((order) => {
+   701→                      const next = getNextStatus(order.status)
+   702→                      return (
+   703→                        <div
+   704→                          key={order.id}
+   705→                          className="p-4 rounded-xl border bg-white space-y-3"
+   706→                        >
+   707→                          <div className="flex items-start justify-between gap-3 flex-col sm:flex-row">
+   708→                            <div className="flex-1 min-w-0">
+   709→                              <div className="flex items-center gap-2 flex-wrap">
+   710→                                <span className="font-semibold">{order.clientName}</span>
+   711→                                <Badge variant="secondary">{SERVICE_LABELS[order.serviceType]}</Badge>
+   712→                                <Badge variant="outline" className={STATUS_COLORS[order.status]}>
+   713→                                  {STATUS_ICONS[order.status]}
+   714→                                  <span className="ml-1">{STATUS_LABELS[order.status]}</span>
+   715→                                </Badge>
+   716→                              </div>
+   717→                              <p className="text-xs text-muted-foreground mt-1">
+   718→                                Recogida: {order.pickupDate} a las {order.pickupTime} · {formatPrice(order.price)}
+   719→                              </p>
+   720→                              {order.notes && (
+   721→                                <p className="text-xs text-muted-foreground mt-1 italic">"{order.notes}"</p>
+   722→                              )}
+   723→                            </div>
+   724→                          </div>
+   725→
+   726→                          {/* Progress dots */}
+   727→                          <div className="flex items-center gap-1 overflow-x-auto pb-1">
+   728→                            {STATUS_FLOW.map((s, i) => (
+   729→                              <div key={s} className="flex items-center gap-1 shrink-0">
+   730→                                <div
+   731→                                  className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium transition-all ${
+   732→                                    STATUS_FLOW.indexOf(order.status) >= i
+   733→                                      ? 'bg-emerald-500 text-white scale-100'
+   734→                                      : 'bg-muted text-muted-foreground scale-90'
+   735→                                  }`}
+   736→                                >
+   737→                                  {i + 1}
+   738→                                </div>
+   739→                                {i < STATUS_FLOW.length - 1 && (
+   740→                                  <div
+   741→                                    className={`h-1 w-5 sm:w-8 rounded transition-all ${
+   742→                                      STATUS_FLOW.indexOf(order.status) > i
+   743→                                        ? 'bg-emerald-500'
+   744→                                        : 'bg-muted'
+   745→                                    }`}
+   746→                                  />
+   747→                                )}
+   748→                              </div>
+   749→                            ))}
+   750→                          </div>
+   751→
+   752→                          {/* Action button */}
+   753→                          {next && (
+   754→                            <Button
+   755→                              onClick={() => handleChangeStatus(order.id, next)}
+   756→                              disabled={loading}
+   757→                              className="w-full sm:w-auto bg-violet-600 hover:bg-violet-700"
+   758→                            >
+   759→                              {STATUS_ICONS[next]}
+   760→                              <span className="ml-2">
+   761→                                Cambiar a: {STATUS_LABELS[next]}
+   762→                              </span>
+   763→                            </Button>
+   764→                          )}
+   765→                        </div>
+   766→                      )
+   767→                    })}
+   768→                  </div>
+   769→                </ScrollArea>
+   770→              )}
+   771→            </CardContent>
+   772→          </Card>
+   773→
+   774→          {/* Completed orders */}
+   775→          {completedOrders.length > 0 && (
+   776→            <Card className="border-0 shadow-md">
+   777→              <CardHeader>
+   778→                <CardTitle className="text-lg flex items-center gap-2">
+   779→                  <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+   780→                  Completadas ({completedOrders.length})
+   781→                </CardTitle>
+   782→              </CardHeader>
+   783→              <CardContent>
+   784→                <ScrollArea className="max-h-64">
+   785→                  <div className="space-y-2">
+   786→                    {completedOrders.map((order) => (
+   787→                      <div
+   788→                        key={order.id}
+   789→                        className="flex items-center justify-between p-3 rounded-xl border bg-white opacity-70"
+   790→                      >
+   791→                        <div>
+   792→                          <span className="font-semibold text-sm">{order.clientName}</span>
+   793→                          <span className="text-xs text-muted-foreground ml-2">
+   794→                            {SERVICE_LABELS[order.serviceType]}
+   795→                          </span>
+   796→                        </div>
+   797→                        <Badge className="bg-gray-100 text-gray-600 border border-gray-300">
+   798→                          <CheckCircle2 className="h-3 w-3 mr-1" /> Entregado
+   799→                        </Badge>
+   800→                      </div>
+   801→                    ))}
+   802→                  </div>
+   803→                </ScrollArea>
+   804→              </CardContent>
+   805→            </Card>
+   806→          )}
+   807→        </main>
+   808→        <Toaster position="top-center" />
+   809→      </div>
+   810→    )
+   811→  }
+   812→
+   813→  return null
+   814→}
