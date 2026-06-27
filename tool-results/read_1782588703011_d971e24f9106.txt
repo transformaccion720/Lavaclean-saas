@@ -1,0 +1,951 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→import { useState, useEffect, useCallback } from 'react'
+     4→     4→import { io, Socket } from 'socket.io-client'
+     5→     5→import { Button } from '@/components/ui/button'
+     6→     6→import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+     7→     7→import { Input } from '@/components/ui/input'
+     8→     8→import { Label } from '@/components/ui/label'
+     9→     9→import { Badge } from '@/components/ui/badge'
+    10→    10→import { ScrollArea } from '@/components/ui/scroll-area'
+    11→    11→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+    12→    12→import { Textarea } from '@/components/ui/textarea'
+    13→    13→import { Toaster, toast } from 'sonner'
+    14→    14→import {
+    15→    15→  Shirt, Clock, DollarSign, Package, PackageCheck, Truck, CheckCircle2, LogOut,
+    16→    16→  User, RefreshCw, Star, TrendingUp, AlertCircle, Users, ShoppingBag,
+    17→    17→  Warehouse, FlaskConical, MapPin, Plus, Trash2, Edit3, X, ChevronRight,
+    18→    18→  LayoutDashboard, Boxes, Beaker, Route, Save, Eye,
+    19→    19→} from 'lucide-react'
+    20→    20→
+    21→    21→/* ══════════ Types ══════════ */
+    22→    22→interface UserData {
+    23→    23→  id: string; name: string; email: string; role: string
+    24→    24→  phone: string; address: string; createdAt: string; updatedAt: string
+    25→    25→}
+    26→    26→interface GarmentData {
+    27→    27→  id: string; orderId: string; type: string; description: string
+    28→    28→  color: string; brand: string; quantity: number; status: string
+    29→    29→  createdAt: string; updatedAt: string
+    30→    30→}
+    31→    31→interface InventoryItem {
+    32→    32→  id: string; name: string; category: string; quantity: number
+    33→    33→  unit: string; minStock: number; cost: number; createdAt: string; updatedAt: string
+    34→    34→}
+    35→    35→interface MaterialData {
+    36→    36→  id: string; name: string; category: string; quantity: number
+    37→    37→  unit: string; costPerUnit: number; supplier: string; createdAt: string; updatedAt: string
+    38→    38→}
+    39→    39→interface DeliveryData {
+    40→    40→  id: string; orderId: string; driverName: string; status: string
+    41→    41→  address: string; deliveredAt: string | null; notes: string
+    42→    42→  order: { clientName: string; clientEmail: string; serviceType: string; price: number } | null
+    43→    43→  createdAt: string; updatedAt: string
+    44→    44→}
+    45→    45→interface OrderData {
+    46→    46→  id: string; clientName: string; clientEmail: string; serviceType: string
+    47→    47→  status: string; pickupDate: string; pickupTime: string; price: number
+    48→    48→  notes: string; createdAt: string; updatedAt: string
+    49→    49→  garments?: GarmentData[]; delivery?: DeliveryData | null
+    50→    50→}
+    51→    51→interface Stats {
+    52→    52→  totalOrders: number; todayOrders: number; totalRevenue: number; todayRevenue: number
+    53→    53→  statusCounts: Record<string, number>; totalUsers: number; totalGarments: number
+    54→    54→  lowStockItems: number; pendingDeliveries: number; totalMaterials: number
+    55→    55→}
+    56→    56→
+    57→    57→/* ══════════ Constants ══════════ */
+    58→    58→const STATUS_LABELS: Record<string, string> = {
+    59→    59→  PENDIENTE: 'Pendiente', RECOGIDO: 'Recogido', EN_LAVADO: 'En lavado',
+    60→    60→  LISTO: 'Listo para entregar', ENTREGADO: 'Entregado',
+    61→    61→  RECIBIDA: 'Recibida', EN_PROCESO: 'En proceso', LAVADA: 'Lavada',
+    62→    62→  ASIGNADA: 'Asignada', EN_CAMINO: 'En camino',
+    63→    63→}
+    64→    64→const STATUS_COLORS: Record<string, string> = {
+    65→    65→  PENDIENTE: 'bg-yellow-100 text-yellow-800 border-yellow-300',
+    66→    66→  RECOGIDO: 'bg-sky-100 text-sky-800 border-sky-300',
+    67→    67→  EN_LAVADO: 'bg-violet-100 text-violet-800 border-violet-300',
+    68→    68→  LISTO: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+    69→    69→  ENTREGADO: 'bg-gray-100 text-gray-600 border-gray-300',
+    70→    70→  RECIBIDA: 'bg-yellow-100 text-yellow-800 border-yellow-300',
+    71→    71→  EN_PROCESO: 'bg-violet-100 text-violet-800 border-violet-300',
+    72→    72→  LAVADA: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+    73→    73→  ASIGNADA: 'bg-sky-100 text-sky-800 border-sky-300',
+    74→    74→  EN_CAMINO: 'bg-amber-100 text-amber-800 border-amber-300',
+    75→    75→}
+    76→    76→const SERVICE_LABELS: Record<string, string> = {
+    77→    77→  LAVADO: 'Lavado', SECADO: 'Secado', PLANCHADO: 'Planchado', COMPLETO: 'Completo',
+    78→    78→}
+    79→    79→const STATUS_FLOW = ['PENDIENTE', 'RECOGIDO', 'EN_LAVADO', 'LISTO', 'ENTREGADO']
+    80→    80→const DELIVERY_FLOW = ['PENDIENTE', 'ASIGNADA', 'EN_CAMINO', 'ENTREGADO']
+    81→    81→const GARMENT_TYPES = ['Camisa', 'Pantalón', 'Vestido', 'Saco', 'Falda', 'Jeans', 'Blusa', 'Chaqueta', 'Sudadera', 'Ropa interior', 'Toalla', 'Sábana', 'Edredón', 'Otro']
+    82→    82→const INV_CATEGORIES = ['DETERGENTE', 'SUAVIZANTE', 'CLORO', 'PERFUMINA', 'BOLSAS', 'GANCHOS', 'ETIQUETAS', 'GENERAL']
+    83→    83→const MAT_CATEGORIES = ['QUIMICO', 'DETERGENTE', 'SUAVIZANTE', 'CLORO', 'SPOT', 'PERFUME', 'EMPACQUE', 'OTRO']
+    84→    84→const formatPrice = (n: number) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(n)
+    85→    85→const fmtDate = (d: string) => { try { return new Date(d).toLocaleDateString('es-CO') } catch { return d } }
+    86→    86→
+    87→    87→/* ══════════ Reusable Components ══════════ */
+    88→    88→function Modal({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
+    89→    89→  if (!open) return null
+    90→    90→  return (
+    91→    91→    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
+    92→    92→      <Card className="w-full max-w-lg max-h-[90vh] overflow-y-auto border-0 shadow-2xl" onClick={e => e.stopPropagation()}>
+    93→    93→        <CardHeader className="flex flex-row items-center justify-between pb-2">
+    94→    94→          <CardTitle className="text-lg">{title}</CardTitle>
+    95→    95→          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}><X className="h-4 w-4" /></Button>
+    96→    96→        </CardHeader>
+    97→    97→        <CardContent>{children}</CardContent>
+    98→    98→      </Card>
+    99→    99→    </div>
+   100→   100→  )
+   101→   101→}
+   102→   102→function StatCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: string | number; color: string }) {
+   103→   103→  return (
+   104→   104→    <Card className="border-0 shadow-md"><CardContent className="p-4">
+   105→   105→      <div className="flex items-center gap-3">
+   106→   106→        <div className={`w-10 h-10 rounded-xl ${color} flex items-center justify-center flex-shrink-0`}>{icon}</div>
+   107→   107→        <div className="min-w-0"><p className="text-xs text-muted-foreground truncate">{label}</p><p className="text-lg font-bold truncate">{value}</p></div>
+   108→   108→      </div>
+   109→   109→    </CardContent></Card>
+   110→   110→  )
+   111→   111→}
+   112→   112→function Field({ label, children, required }: { label: string; children: React.ReactNode; required?: boolean }) {
+   113→   113→  return <div className="space-y-1.5"><Label className="text-sm">{label}{required && <span className="text-red-500 ml-0.5">*</span>}{!required && <span className="text-muted-foreground text-xs ml-1">(opcional)</span>}</Label>{children}</div>
+   114→   114→}
+   115→   115→function StatusBadge({ status }: { status: string }) {
+   116→   116→  return <Badge variant="outline" className={`${STATUS_COLORS[status] || 'bg-gray-100 text-gray-600'} px-2 py-0.5 text-xs`}>{STATUS_LABELS[status] || status}</Badge>
+   117→   117→}
+   118→   118→function EmptyState({ icon, msg }: { icon: React.ReactNode; msg: string }) {
+   119→   119→  return <div className="text-center py-10 text-muted-foreground"><div className="opacity-40 mx-auto mb-2">{icon}</div><p className="text-sm">{msg}</p></div>
+   120→   120→}
+   121→   121→
+   122→   122→/* ══════════ Main Component ══════════ */
+   123→   123→export default function LaundryApp() {
+   124→   124→  const [user, setUser] = useState<UserData | null>(null)
+   125→   125→  const [orders, setOrders] = useState<OrderData[]>([])
+   126→   126→  const [stats, setStats] = useState<Stats | null>(null)
+   127→   127→  const [socket, setSocket] = useState<Socket | null>(null)
+   128→   128→  const [loading, setLoading] = useState(false)
+   129→   129→  const [loginEmail, setLoginEmail] = useState('')
+   130→   130→  const [loginPassword, setLoginPassword] = useState('')
+   131→   131→
+   132→   132→  // Client form
+   133→   133→  const [formService, setFormService] = useState('')
+   134→   134→  const [formDate, setFormDate] = useState('')
+   135→   135→  const [formTime, setFormTime] = useState('')
+   136→   136→  const [formNotes, setFormNotes] = useState('')
+   137→   137→  const [formGarments, setFormGarments] = useState<{ type: string; color: string; quantity: number }[]>([{ type: '', color: '', quantity: 1 }])
+   138→   138→
+   139→   139→  // Admin sub-views
+   140→   140→  const [adminTab, setAdminTab] = useState('dashboard')
+   141→   141→  const [users, setUsers] = useState<UserData[]>([])
+   142→   142→  const [inventory, setInventory] = useState<InventoryItem[]>([])
+   143→   143→  const [materials, setMaterials] = useState<MaterialData[]>([])
+   144→   144→  const [deliveries, setDeliveries] = useState<DeliveryData[]>([])
+   145→   145→  const [selectedOrder, setSelectedOrder] = useState<OrderData | null>(null)
+   146→   146→
+   147→   147→  // Modals
+   148→   148→  const [showUserModal, setShowUserModal] = useState(false)
+   149→   149→  const [showInvModal, setShowInvModal] = useState(false)
+   150→   150→  const [showMatModal, setShowMatModal] = useState(false)
+   151→   151→  const [showDelModal, setShowDelModal] = useState(false)
+   152→   152→  const [showOrderDetail, setShowOrderDetail] = useState(false)
+   153→   153→  const [editId, setEditId] = useState<string | null>(null)
+   154→   154→
+   155→   155→  // Form states for modals
+   156→   156→  const [userForm, setUserForm] = useState({ name: '', email: '', role: 'CLIENT', phone: '', address: '', password: '' })
+   157→   157→  const [invForm, setInvForm] = useState({ name: '', category: 'GENERAL', quantity: 0, unit: 'unidad', minStock: 5, cost: 0 })
+   158→   158→  const [matForm, setMatForm] = useState({ name: '', category: 'QUIMICO', quantity: 0, unit: 'litro', costPerUnit: 0, supplier: '' })
+   159→   159→  const [delForm, setDelForm] = useState({ orderId: '', driverName: '', address: '', notes: '' })
+   160→   160→
+   161→   161→  const apiFetch = useCallback(async (url: string, opts?: RequestInit) => {
+   162→   162→    const res = await fetch(url, opts)
+   163→   163→    return { data: await res.json(), ok: res.ok }
+   164→   164→  }, [])
+   165→   165→
+   166→   166→  const fetchOrders = useCallback(async (email?: string) => {
+   167→   167→    const url = email ? `/api/orders?clientEmail=${email}` : '/api/orders'
+   168→   168→    const { data } = await apiFetch(url)
+   169→   169→    setOrders(data)
+   170→   170→  }, [apiFetch])
+   171→   171→
+   172→   172→  const fetchStats = useCallback(async () => {
+   173→   173→    const { data } = await apiFetch('/api/stats')
+   174→   174→    setStats(data)
+   175→   175→  }, [apiFetch])
+   176→   176→
+   177→   177→  const fetchAdminData = useCallback(async () => {
+   178→   178→    const [u, i, m, d] = await Promise.all([
+   179→   179→      apiFetch('/api/users'), apiFetch('/api/inventory'),
+   180→   180→      apiFetch('/api/materials'), apiFetch('/api/deliveries'),
+   181→   181→    ])
+   182→   182→    setUsers(u.data); setInventory(i.data); setMaterials(m.data); setDeliveries(d.data)
+   183→   183→  }, [apiFetch])
+   184→   184→
+   185→   185→  // Socket
+   186→   186→  useEffect(() => {
+   187→   187→    const s = io('/?XTransformPort=3004', { transports: ['websocket', 'polling'], forceNew: true, reconnection: true, reconnectionAttempts: 10, reconnectionDelay: 1000 })
+   188→   188→    setSocket(s)
+   189→   189→    s.on('order-updated', (data: { action: string; order: OrderData }) => {
+   190→   190→      setOrders(prev => {
+   191→   191→        const idx = prev.findIndex(o => o.id === data.order.id)
+   192→   192→        if (idx >= 0) { const u = [...prev]; u[idx] = data.order; return u }
+   193→   193→        if (data.action === 'created') return [data.order, ...prev]
+   194→   194→        return prev
+   195→   195→      })
+   196→   196→      fetchStats()
+   197→   197→      toast.success(data.action === 'created' ? 'Nuevo pedido creado' : 'Estado actualizado')
+   198→   198→    })
+   199→   199→    return () => { s.disconnect() }
+   200→   200→  }, [fetchStats])
+   201→   201→
+   202→   202→  // Login
+   203→   203→  const handleLogin = async () => {
+   204→   204→    if (!loginEmail.trim() || !loginPassword.trim()) return
+   205→   205→    setLoading(true)
+   206→   206→    try {
+   207→   207→      const { data, ok } = await apiFetch('/api/login', {
+   208→   208→        method: 'POST', headers: { 'Content-Type': 'application/json' },
+   209→   209→        body: JSON.stringify({ email: loginEmail, password: loginPassword }),
+   210→   210→      })
+   211→   211→      if (!ok) { toast.error(data.error || 'Error al iniciar sesión'); return }
+   212→   212→      setUser(data)
+   213→   213→      socket?.emit('join-role', data.role)
+   214→   214→      if (data.role === 'CLIENT') fetchOrders(data.email)
+   215→   215→      else { fetchOrders(); fetchStats(); fetchAdminData() }
+   216→   216→    } catch { toast.error('Error de conexión') }
+   217→   217→    finally { setLoading(false) }
+   218→   218→  }
+   219→   219→
+   220→   220→  // Client: Create order
+   221→   221→  const handleCreateOrder = async () => {
+   222→   222→    if (!user || !formService || !formDate || !formTime) { toast.error('Completa todos los campos requeridos'); return }
+   223→   223→    const validGarments = formGarments.filter(g => g.type)
+   224→   224→    setLoading(true)
+   225→   225→    try {
+   226→   226→      const { data, ok } = await apiFetch('/api/orders', {
+   227→   227→        method: 'POST', headers: { 'Content-Type': 'application/json' },
+   228→   228→        body: JSON.stringify({
+   229→   229→          clientName: user.name, clientEmail: user.email, serviceType: formService,
+   230→   230→          pickupDate: formDate, pickupTime: formTime, notes: formNotes,
+   231→   231→          garments: validGarments.length > 0 ? validGarments : undefined,
+   232→   232→        }),
+   233→   233→      })
+   234→   234→      if (ok) {
+   235→   235→        socket?.emit('order-created', data)
+   236→   236→        setFormService(''); setFormDate(''); setFormTime(''); setFormNotes('')
+   237→   237→        setFormGarments([{ type: '', color: '', quantity: 1 }])
+   238→   238→        fetchOrders(user.email); toast.success('Pedido creado exitosamente')
+   239→   239→      }
+   240→   240→    } catch { toast.error('Error al crear pedido') }
+   241→   241→    finally { setLoading(false) }
+   242→   242→  }
+   243→   243→
+   244→   244→  // Worker: Change status
+   245→   245→  const handleChangeStatus = async (orderId: string, newStatus: string) => {
+   246→   246→    setLoading(true)
+   247→   247→    try {
+   248→   248→      const { data, ok } = await apiFetch('/api/orders', {
+   249→   249→        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+   250→   250→        body: JSON.stringify({ id: orderId, status: newStatus }),
+   251→   251→      })
+   252→   252→      if (ok) { socket?.emit('order-status-changed', data); fetchOrders() }
+   253→   253→    } catch { toast.error('Error al cambiar estado') }
+   254→   254→    finally { setLoading(false) }
+   255→   255→  }
+   256→   256→  const getNextStatus = (current: string, flow: string[] = STATUS_FLOW): string | null => {
+   257→   257→    const idx = flow.indexOf(current)
+   258→   258→    return idx >= 0 && idx < flow.length - 1 ? flow[idx + 1] : null
+   259→   259→  }
+   260→   260→
+   261→   261→  // Generic CRUD helpers
+   262→   262→  const crud = async (url: string, method: string, body?: object) => {
+   263→   263→    setLoading(true)
+   264→   264→    try {
+   265→   265→      const { data, ok } = await apiFetch(url, {
+   266→   266→        method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
+   267→   267→      })
+   268→   268→      if (ok) { toast.success('Operación exitosa'); fetchAdminData(); fetchStats(); fetchOrders(); }
+   269→   269→      else toast.error(data.error || 'Error')
+   270→   270→      return { data, ok }
+   271→   271→    } catch { toast.error('Error de conexión'); return { data: null, ok: false } }
+   272→   272→    finally { setLoading(false) }
+   273→   273→  }
+   274→   274→
+   275→   275→  // User CRUD
+   276→   276→  const openUserModal = (u?: UserData) => {
+   277→   277→    if (u) { setEditId(u.id); setUserForm({ name: u.name, email: u.email, role: u.role, phone: u.phone || '', address: u.address || '', password: '' }) }
+   278→   278→    else { setEditId(null); setUserForm({ name: '', email: '', role: 'CLIENT', phone: '', address: '', password: '1234' }) }
+   279→   279→    setShowUserModal(true)
+   280→   280→  }
+   281→   281→  const saveUser = async () => {
+   282→   282→    if (!userForm.name || !userForm.email) { toast.error('Nombre y correo requeridos'); return }
+   283→   283→    if (editId) await crud('/api/users', 'PATCH', { id: editId, ...userForm, password: userForm.password || '1234' })
+   284→   284→    else await crud('/api/users', 'POST', userForm)
+   285→   285→    setShowUserModal(false)
+   286→   286→  }
+   287→   287→  const deleteUser = async (id: string) => { await crud(`/api/users?id=${id}`, 'DELETE') }
+   288→   288→
+   289→   289→  // Inventory CRUD
+   290→   290→  const openInvModal = (item?: InventoryItem) => {
+   291→   291→    if (item) { setEditId(item.id); setInvForm({ name: item.name, category: item.category, quantity: item.quantity, unit: item.unit, minStock: item.minStock, cost: item.cost }) }
+   292→   292→    else { setEditId(null); setInvForm({ name: '', category: 'GENERAL', quantity: 0, unit: 'unidad', minStock: 5, cost: 0 }) }
+   293→   293→    setShowInvModal(true)
+   294→   294→  }
+   295→   295→  const saveInv = async () => {
+   296→   296→    if (!invForm.name) { toast.error('Nombre requerido'); return }
+   297→   297→    if (editId) await crud('/api/inventory', 'PATCH', { id: editId, ...invForm })
+   298→   298→    else await crud('/api/inventory', 'POST', invForm)
+   299→   299→    setShowInvModal(false)
+   300→   300→  }
+   301→   301→  const deleteInv = async (id: string) => { await crud(`/api/inventory?id=${id}`, 'DELETE') }
+   302→   302→
+   303→   303→  // Material CRUD
+   304→   304→  const openMatModal = (m?: MaterialData) => {
+   305→   305→    if (m) { setEditId(m.id); setMatForm({ name: m.name, category: m.category, quantity: m.quantity, unit: m.unit, costPerUnit: m.costPerUnit, supplier: m.supplier || '' }) }
+   306→   306→    else { setEditId(null); setMatForm({ name: '', category: 'QUIMICO', quantity: 0, unit: 'litro', costPerUnit: 0, supplier: '' }) }
+   307→   307→    setShowMatModal(true)
+   308→   308→  }
+   309→   309→  const saveMat = async () => {
+   310→   310→    if (!matForm.name) { toast.error('Nombre requerido'); return }
+   311→   311→    if (editId) await crud('/api/materials', 'PATCH', { id: editId, ...matForm })
+   312→   312→    else await crud('/api/materials', 'POST', matForm)
+   313→   313→    setShowMatModal(false)
+   314→   314→  }
+   315→   315→  const deleteMat = async (id: string) => { await crud(`/api/materials?id=${id}`, 'DELETE') }
+   316→   316→
+   317→   317→  // Delivery CRUD
+   318→   318→  const openDelModal = (d?: DeliveryData, orderId?: string) => {
+   319→   319→    if (d) { setEditId(d.id); setDelForm({ orderId: d.orderId, driverName: d.driverName, address: d.address || '', notes: d.notes || '' }) }
+   320→   320→    else { setEditId(null); setDelForm({ orderId: orderId || '', driverName: '', address: '', notes: '' }) }
+   321→   321→    setShowDelModal(true)
+   322→   322→  }
+   323→   323→  const saveDel = async () => {
+   324→   324→    if (!delForm.orderId) { toast.error('Orden requerida'); return }
+   325→   325→    if (editId) await crud('/api/deliveries', 'PATCH', { id: editId, ...delForm })
+   326→   326→    else await crud('/api/deliveries', 'POST', delForm)
+   327→   327→    setShowDelModal(false)
+   328→   328→  }
+   329→   329→  const changeDelStatus = async (id: string, status: string) => {
+   330→   330→    await crud('/api/deliveries', 'PATCH', { id, status })
+   331→   331→    fetchAdminData()
+   332→   332→  }
+   333→   333→  const deleteDel = async (id: string) => { await crud(`/api/deliveries?id=${id}`, 'DELETE') }
+   334→   334→
+   335→   335→  const logout = () => {
+   336→   336→    setUser(null); setOrders([]); setStats(null); setAdminTab('dashboard')
+   337→   337→    setLoginEmail(''); setLoginPassword('')
+   338→   338→  }
+   339→   339→
+   340→   340→  /* ══════════ LOGIN SCREEN ══════════ */
+   341→   341→  if (!user) {
+   342→   342→    return (
+   343→   343→      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 p-4">
+   344→   344→        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+   345→   345→          <div className="absolute -top-40 -right-40 w-80 h-80 bg-emerald-200/30 rounded-full blur-3xl" />
+   346→   346→          <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-teal-200/30 rounded-full blur-3xl" />
+   347→   347→        </div>
+   348→   348→        <Card className="w-full max-w-md relative z-10 shadow-xl border-0">
+   349→   349→          <CardHeader className="text-center pb-2">
+   350→   350→            <div className="mx-auto w-16 h-16 bg-emerald-100 rounded-2xl flex items-center justify-center mb-4">
+   351→   351→              <Shirt className="h-8 w-8 text-emerald-600" />
+   352→   352→            </div>
+   353→   353→            <CardTitle className="text-2xl font-bold tracking-tight">LavaClean SaaS</CardTitle>
+   354→   354→            <CardDescription>Inicia sesión para continuar</CardDescription>
+   355→   355→          </CardHeader>
+   356→   356→          <CardContent className="space-y-4 pt-2">
+   357→   357→            <Field label="Correo electrónico">
+   358→   358→              <Input type="email" placeholder="tu@correo.com" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleLogin()} />
+   359→   359→            </Field>
+   360→   360→            <Field label="Contraseña">
+   361→   361→              <Input type="password" placeholder="••••" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleLogin()} />
+   362→   362→            </Field>
+   363→   363→            <Button onClick={handleLogin} disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-700">
+   364→   364→              {loading ? 'Ingresando...' : 'Iniciar sesión'}
+   365→   365→            </Button>
+   366→   366→            <div className="pt-2 border-t">
+   367→   367→              <p className="text-xs text-muted-foreground text-center mb-3">Cuentas de prueba:</p>
+   368→   368→              <div className="grid gap-2">
+   369→   369→                {[
+   370→   370→                  { email: 'cliente@lavanderia.com', role: 'Cliente', color: 'text-teal-600' },
+   371→   371→                  { email: 'admin@lavanderia.com', role: 'Administrador', color: 'text-amber-600' },
+   372→   372→                  { email: 'operario@lavanderia.com', role: 'Operario', color: 'text-violet-600' },
+   373→   373→                ].map(acc => (
+   374→   374→                  <button key={acc.email} onClick={() => { setLoginEmail(acc.email); setLoginPassword('1234') }}
+   375→   375→                    className="flex items-center justify-between px-3 py-2 rounded-lg border hover:bg-muted/50 transition-colors text-left">
+   376→   376→                    <div className="flex items-center gap-2"><User className="h-4 w-4 text-muted-foreground" /><span className="text-sm">{acc.role}</span></div>
+   377→   377→                    <span className="text-xs text-muted-foreground">{acc.email}</span>
+   378→   378→                  </button>
+   379→   379→                ))}
+   380→   380→              </div>
+   381→   381→              <p className="text-xs text-muted-foreground text-center mt-2">Contraseña: 1234</p>
+   382→   382→            </div>
+   383→   383→          </CardContent>
+   384→   384→        </Card>
+   385→   385→        <Toaster position="top-center" />
+   386→   386→      </div>
+   387→   387→    )
+   388→   388→  }
+   389→   389→
+   390→   390→  /* ══════════ Shared Header ══════════ */
+   391→   391→  const roleLabel = user.role === 'CLIENT' ? 'Cliente' : user.role === 'ADMIN' ? 'Administrador' : 'Operario'
+   392→   392→  const roleColor = user.role === 'CLIENT' ? 'bg-teal-100 text-teal-700' : user.role === 'ADMIN' ? 'bg-amber-100 text-amber-700' : 'bg-violet-100 text-violet-700'
+   393→   393→
+   394→   394→  const Header = () => (
+   395→   395→    <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b">
+   396→   396→      <div className="max-w-7xl mx-auto flex items-center justify-between px-4 h-14">
+   397→   397→        <div className="flex items-center gap-2">
+   398→   398→          <Shirt className="h-5 w-5 text-emerald-600" />
+   399→   399→          <span className="font-bold text-lg">LavaClean</span>
+   400→   400→          <Badge className={roleColor}>{roleLabel}</Badge>
+   401→   401→        </div>
+   402→   402→        <Button variant="ghost" size="sm" onClick={logout}><LogOut className="h-4 w-4 mr-1" /> Salir</Button>
+   403→   403→      </div>
+   404→   404→    </header>
+   405→   405→  )
+   406→   406→
+   407→   407→  /* ══════════ CLIENT SCREEN ══════════ */
+   408→   408→  if (user.role === 'CLIENT') {
+   409→   409→    return (
+   410→   410→      <div className="min-h-screen flex flex-col bg-gradient-to-br from-slate-50 to-slate-100">
+   411→   411→        <Header />
+   412→   412→        <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-6 space-y-6">
+   413→   413→          <h1 className="text-2xl font-bold">Hola, {user.name.split(' ')[0]}</h1>
+   414→   414→
+   415→   415→          <Card className="border-0 shadow-md">
+   416→   416→            <CardHeader>
+   417→   417→              <CardTitle className="text-lg flex items-center gap-2"><Package className="h-5 w-5 text-emerald-600" /> Solicitar recogida</CardTitle>
+   418→   418→              <CardDescription>Completa los datos para pedir tu servicio de lavandería</CardDescription>
+   419→   419→            </CardHeader>
+   420→   420→            <CardContent className="space-y-4">
+   421→   421→              <div className="grid sm:grid-cols-2 gap-4">
+   422→   422→                <Field label="Tipo de servicio" required>
+   423→   423→                  <Select value={formService} onValueChange={setFormService}>
+   424→   424→                    <SelectTrigger><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
+   425→   425→                    <SelectContent>
+   426→   426→                      <SelectItem value="LAVADO">Lavado — {formatPrice(15000)}</SelectItem>
+   427→   427→                      <SelectItem value="SECADO">Secado — {formatPrice(10000)}</SelectItem>
+   428→   428→                      <SelectItem value="PLANCHADO">Planchado — {formatPrice(12000)}</SelectItem>
+   429→   429→                      <SelectItem value="COMPLETO">Completo — {formatPrice(30000)}</SelectItem>
+   430→   430→                    </SelectContent>
+   431→   431→                  </Select>
+   432→   432→                </Field>
+   433→   433→                <Field label="Fecha de recogida" required><Input type="date" value={formDate} onChange={e => setFormDate(e.target.value)} /></Field>
+   434→   434→                <Field label="Hora de recogida" required><Input type="time" value={formTime} onChange={e => setFormTime(e.target.value)} /></Field>
+   435→   435→                <Field label="Notas adicionales"><Textarea placeholder="Instrucciones especiales..." value={formNotes} onChange={e => setFormNotes(e.target.value)} /></Field>
+   436→   436→              </div>
+   437→   437→
+   438→   438→              <div className="space-y-2">
+   439→   439→                <div className="flex items-center justify-between">
+   440→   440→                  <Label className="text-sm">Prendas a lavar</Label>
+   441→   441→                  <Button type="button" variant="outline" size="sm" onClick={() => setFormGarments(p => [...p, { type: '', color: '', quantity: 1 }])}><Plus className="h-3 w-3 mr-1" />Agregar</Button>
+   442→   442→                </div>
+   443→   443→                {formGarments.map((g, idx) => (
+   444→   444→                  <div key={idx} className="flex gap-2 items-end">
+   445→   445→                    <div className="flex-1"><Label className="text-xs">Tipo</Label>
+   446→   446→                      <Select value={g.type} onValueChange={v => { const n = [...formGarments]; n[idx].type = v; setFormGarments(n) }}>
+   447→   447→                        <SelectTrigger className="h-9"><SelectValue placeholder="Tipo..." /></SelectTrigger>
+   448→   448→                        <SelectContent>{GARMENT_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+   449→   449→                      </Select>
+   450→   450→                    </div>
+   451→   451→                    <div className="w-28"><Label className="text-xs">Color</Label><Input className="h-9" placeholder="Blanco" value={g.color} onChange={e => { const n = [...formGarments]; n[idx].color = e.target.value; setFormGarments(n) }} /></div>
+   452→   452→                    <div className="w-20"><Label className="text-xs">Cant.</Label><Input type="number" min={1} className="h-9" value={g.quantity} onChange={e => { const n = [...formGarments]; n[idx].quantity = parseInt(e.target.value) || 1; setFormGarments(n) }} /></div>
+   453→   453→                    {formGarments.length > 1 && <Button variant="ghost" size="icon" className="h-9 w-9 text-red-500" onClick={() => setFormGarments(p => p.filter((_, i) => i !== idx))}><Trash2 className="h-4 w-4" /></Button>}
+   454→   454→                  </div>
+   455→   455→                ))}
+   456→   456→              </div>
+   457→   457→
+   458→   458→              <Button onClick={handleCreateOrder} disabled={loading || !formService || !formDate || !formTime} className="w-full bg-emerald-600 hover:bg-emerald-700">
+   459→   459→                Crear pedido
+   460→   460→              </Button>
+   461→   461→            </CardContent>
+   462→   462→          </Card>
+   463→   463→
+   464→   464→          <Card className="border-0 shadow-md">
+   465→   465→            <CardHeader>
+   466→   466→              <CardTitle className="text-lg flex items-center gap-2"><Clock className="h-5 w-5 text-emerald-600" /> Mis pedidos</CardTitle>
+   467→   467→              <CardDescription>Sigue el estado de tus pedidos en tiempo real</CardDescription>
+   468→   468→            </CardHeader>
+   469→   469→            <CardContent>
+   470→   470→              {orders.length === 0 ? <EmptyState icon={<Package className="h-10 w-10" />} msg="No tienes pedidos aún" /> : (
+   471→   471→                <ScrollArea className="max-h-96">
+   472→   472→                  <div className="space-y-3">
+   473→   473→                    {orders.map(order => (
+   474→   474→                      <div key={order.id} className="flex items-start sm:items-center justify-between p-4 rounded-xl border bg-white gap-3 flex-col sm:flex-row">
+   475→   475→                        <div className="flex-1 min-w-0">
+   476→   476→                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+   477→   477→                            <span className="font-semibold text-sm">{SERVICE_LABELS[order.serviceType]}</span>
+   478→   478→                            <StatusBadge status={order.status} />
+   479→   479→                          </div>
+   480→   480→                          <p className="text-xs text-muted-foreground">{order.pickupDate} a las {order.pickupTime} · {formatPrice(order.price)}</p>
+   481→   481→                          {order.notes && <p className="text-xs text-muted-foreground mt-1 italic">&ldquo;{order.notes}&rdquo;</p>}
+   482→   482→                          {order.garments && order.garments.length > 0 && (
+   483→   483→                            <div className="flex gap-1 mt-1.5 flex-wrap">{order.garments.map(g => <Badge key={g.id} variant="secondary" className="text-xs">{g.type}{g.color ? ` (${g.color})` : ''} x{g.quantity}</Badge>)}</div>
+   484→   484→                          )}
+   485→   485→                        </div>
+   486→   486→                        <div className="flex items-center gap-1 w-full sm:w-auto shrink-0">
+   487→   487→                          {STATUS_FLOW.map((s, i) => (
+   488→   488→                            <div key={s} className="flex items-center gap-1">
+   489→   489→                              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${STATUS_FLOW.indexOf(order.status) >= i ? 'bg-emerald-500 text-white' : 'bg-muted text-muted-foreground'}`}>{i + 1}</div>
+   490→   490→                              {i < STATUS_FLOW.length - 1 && <div className={`h-0.5 w-4 sm:w-6 ${STATUS_FLOW.indexOf(order.status) > i ? 'bg-emerald-500' : 'bg-muted'}`} />}
+   491→   491→                            </div>
+   492→   492→                          ))}
+   493→   493→                        </div>
+   494→   494→                      </div>
+   495→   495→                    ))}
+   496→   496→                  </div>
+   497→   497→                </ScrollArea>
+   498→   498→              )}
+   499→   499→            </CardContent>
+   500→   500→          </Card>
+   501→   501→        </main>
+   502→   502→        <Toaster position="top-center" />
+   503→   503→      </div>
+   504→   504→    )
+   505→   505→  }
+   506→   506→
+   507→   507→  /* ══════════ WORKER SCREEN ══════════ */
+   508→   508→  if (user.role === 'WORKER') {
+   509→   509→    const activeOrders = orders.filter(o => o.status !== 'ENTREGADO')
+   510→   510→    const completedOrders = orders.filter(o => o.status === 'ENTREGADO')
+   511→   511→    return (
+   512→   512→      <div className="min-h-screen flex flex-col bg-gradient-to-br from-slate-50 to-slate-100">
+   513→   513→        <Header />
+   514→   514→        <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-6 space-y-6">
+   515→   515→          <div className="flex items-center justify-between">
+   516→   516→            <h1 className="text-2xl font-bold">Órdenes de trabajo</h1>
+   517→   517→            <Button variant="outline" size="sm" onClick={() => fetchOrders()}><RefreshCw className="h-4 w-4 mr-1" /> Actualizar</Button>
+   518→   518→          </div>
+   519→   519→          <Card className="border-0 shadow-md">
+   520→   520→            <CardHeader>
+   521→   521→              <CardTitle className="text-lg flex items-center gap-2"><RefreshCw className="h-5 w-5 text-violet-600" /> Activas ({activeOrders.length})</CardTitle>
+   522→   522→              <CardDescription>Haz clic para avanzar al siguiente estado</CardDescription>
+   523→   523→            </CardHeader>
+   524→   524→            <CardContent>
+   525→   525→              {activeOrders.length === 0 ? <EmptyState icon={<CheckCircle2 className="h-10 w-10" />} msg="Todas las órdenes están completadas" /> : (
+   526→   526→                <ScrollArea className="max-h-[500px]">
+   527→   527→                  <div className="space-y-3">{activeOrders.map(order => {
+   528→   528→                    const next = getNextStatus(order.status)
+   529→   529→                    return (
+   530→   530→                      <div key={order.id} className="p-4 rounded-xl border bg-white space-y-3">
+   531→   531→                        <div className="flex items-start justify-between gap-3 flex-col sm:flex-row">
+   532→   532→                          <div className="flex-1 min-w-0">
+   533→   533→                            <div className="flex items-center gap-2 flex-wrap">
+   534→   534→                              <span className="font-semibold">{order.clientName}</span>
+   535→   535→                              <Badge variant="secondary">{SERVICE_LABELS[order.serviceType]}</Badge>
+   536→   536→                              <StatusBadge status={order.status} />
+   537→   537→                            </div>
+   538→   538→                            <p className="text-xs text-muted-foreground mt-1">Recogida: {order.pickupDate} a las {order.pickupTime} · {formatPrice(order.price)}</p>
+   539→   539→                            {order.notes && <p className="text-xs text-muted-foreground mt-1 italic">&ldquo;{order.notes}&rdquo;</p>}
+   540→   540→                            {order.garments && order.garments.length > 0 && (
+   541→   541→                              <div className="flex gap-1 mt-1.5 flex-wrap">{order.garments.map(g => <Badge key={g.id} variant="outline" className="text-xs">{g.type} x{g.quantity}</Badge>)}</div>
+   542→   542→                            )}
+   543→   543→                          </div>
+   544→   544→                        </div>
+   545→   545→                        <div className="flex items-center gap-1 overflow-x-auto pb-1">
+   546→   546→                          {STATUS_FLOW.map((s, i) => (
+   547→   547→                            <div key={s} className="flex items-center gap-1 shrink-0">
+   548→   548→                              <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium transition-all ${STATUS_FLOW.indexOf(order.status) >= i ? 'bg-emerald-500 text-white' : 'bg-muted text-muted-foreground'}`}>{i + 1}</div>
+   549→   549→                              {i < STATUS_FLOW.length - 1 && <div className={`h-1 w-5 sm:w-8 rounded ${STATUS_FLOW.indexOf(order.status) > i ? 'bg-emerald-500' : 'bg-muted'}`} />}
+   550→   550→                            </div>
+   551→   551→                          ))}
+   552→   552→                        </div>
+   553→   553→                        {next && (
+   554→   554→                          <Button onClick={() => handleChangeStatus(order.id, next)} disabled={loading} className="w-full sm:w-auto bg-violet-600 hover:bg-violet-700">
+   555→   555→                            <ChevronRight className="h-4 w-4" /><span className="ml-1">Cambiar a: {STATUS_LABELS[next]}</span>
+   556→   556→                          </Button>
+   557→   557→                        )}
+   558→   558→                      </div>
+   559→   559→                    )
+   560→   560→                  })}</div>
+   561→   561→                </ScrollArea>
+   562→   562→              )}
+   563→   563→            </CardContent>
+   564→   564→          </Card>
+   565→   565→          {completedOrders.length > 0 && (
+   566→   566→            <Card className="border-0 shadow-md">
+   567→   567→              <CardHeader><CardTitle className="text-lg flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-emerald-600" /> Completadas ({completedOrders.length})</CardTitle></CardHeader>
+   568→   568→              <CardContent><ScrollArea className="max-h-64"><div className="space-y-2">{completedOrders.map(o => (
+   569→   569→                <div key={o.id} className="flex items-center justify-between p-3 rounded-xl border bg-white opacity-70">
+   570→   570→                  <div><span className="font-semibold text-sm">{o.clientName}</span><span className="text-xs text-muted-foreground ml-2">{SERVICE_LABELS[o.serviceType]}</span></div>
+   571→   571→                  <StatusBadge status="ENTREGADO" />
+   572→   572→                </div>
+   573→   573→              ))}</div></ScrollArea></CardContent>
+   574→   574→            </Card>
+   575→   575→          )}
+   576→   576→        </main>
+   577→   577→        <Toaster position="top-center" />
+   578→   578→      </div>
+   579→   579→    )
+   580→   580→  }
+   581→   581→
+   582→   582→  /* ══════════ ADMIN SCREEN ══════════ */
+   583→   583→  const tabs = [
+   584→   584→    { key: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" /> },
+   585→   585→    { key: 'orders', label: 'Pedidos', icon: <ShoppingBag className="h-4 w-4" /> },
+   586→   586→    { key: 'users', label: 'Usuarios', icon: <Users className="h-4 w-4" /> },
+   587→   587→    { key: 'garments', label: 'Prendas', icon: <Shirt className="h-4 w-4" /> },
+   588→   588→    { key: 'inventory', label: 'Inventario', icon: <Boxes className="h-4 w-4" /> },
+   589→   589→    { key: 'materials', label: 'Materiales', icon: <FlaskConical className="h-4 w-4" /> },
+   590→   590→    { key: 'deliveries', label: 'Entregas', icon: <Route className="h-4 w-4" /> },
+   591→   591→  ]
+   592→   592→
+   593→   593→  const openOrderDetail = async (orderId: string) => {
+   594→   594→    const { data } = await apiFetch(`/api/orders?include=garments`)
+   595→   595→    const full = data.find((o: OrderData) => o.id === orderId)
+   596→   596→    if (full) { setSelectedOrder(full); setShowOrderDetail(true) }
+   597→   597→  }
+   598→   598→
+   599→   599→  return (
+   600→   600→    <div className="min-h-screen flex flex-col bg-gradient-to-br from-slate-50 to-slate-100">
+   601→   601→      <Header />
+   602→   602→      <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-6 space-y-6">
+   603→   603→        {/* Tab nav */}
+   604→   604→        <div className="flex gap-1 overflow-x-auto pb-1 -mx-4 px-4">
+   605→   605→          {tabs.map(t => (
+   606→   606→            <button key={t.key} onClick={() => setAdminTab(t.key)}
+   607→   607→              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${adminTab === t.key ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white border text-muted-foreground hover:bg-muted/50'}`}>
+   608→   608→              {t.icon}{t.label}
+   609→   609→            </button>
+   610→   610→          ))}
+   611→   611→        </div>
+   612→   612→
+   613→   613→        {/* ═══ DASHBOARD ═══ */}
+   614→   614→        {adminTab === 'dashboard' && stats && (
+   615→   615→          <>
+   616→   616→            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+   617→   617→              <StatCard icon={<DollarSign className="h-5 w-5 text-amber-600" />} label="Ingresos hoy" value={formatPrice(stats.todayRevenue)} color="bg-amber-100" />
+   618→   618→              <StatCard icon={<TrendingUp className="h-5 w-5 text-emerald-600" />} label="Ingresos totales" value={formatPrice(stats.totalRevenue)} color="bg-emerald-100" />
+   619→   619→              <StatCard icon={<Package className="h-5 w-5 text-sky-600" />} label="Pedidos hoy" value={stats.todayOrders} color="bg-sky-100" />
+   620→   620→              <StatCard icon={<Star className="h-5 w-5 text-violet-600" />} label="Total pedidos" value={stats.totalOrders} color="bg-violet-100" />
+   621→   621→            </div>
+   622→   622→            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+   623→   623→              <StatCard icon={<Users className="h-5 w-5 text-teal-600" />} label="Usuarios" value={stats.totalUsers} color="bg-teal-100" />
+   624→   624→              <StatCard icon={<Shirt className="h-5 w-5 text-pink-600" />} label="Prendas registradas" value={stats.totalGarments} color="bg-pink-100" />
+   625→   625→              <StatCard icon={<AlertCircle className="h-5 w-5 text-red-600" />} label="Stock bajo" value={stats.lowStockItems} color="bg-red-100" />
+   626→   626→              <StatCard icon={<Truck className="h-5 w-5 text-orange-600" />} label="Entregas pendientes" value={stats.pendingDeliveries} color="bg-orange-100" />
+   627→   627→            </div>
+   628→   628→            <Card className="border-0 shadow-md">
+   629→   629→              <CardHeader className="pb-2"><CardTitle className="text-base">Distribución por estado</CardTitle></CardHeader>
+   630→   630→              <CardContent>
+   631→   631→                <div className="flex flex-wrap gap-2">
+   632→   632→                  {STATUS_FLOW.map(s => <Badge key={s} variant="outline" className={`${STATUS_COLORS[s]} px-3 py-1 text-sm`}>{STATUS_LABELS[s]}: {stats.statusCounts[s] || 0}</Badge>)}
+   633→   633→                </div>
+   634→   634→              </CardContent>
+   635→   635→            </Card>
+   636→   636→          </>
+   637→   637→        )}
+   638→   638→
+   639→   639→        {/* ═══ PEDIDOS ═══ */}
+   640→   640→        {adminTab === 'orders' && (
+   641→   641→          <Card className="border-0 shadow-md">
+   642→   642→            <CardHeader><CardTitle className="text-lg">Todas las órdenes</CardTitle><CardDescription>Pedidos en tiempo real</CardDescription></CardHeader>
+   643→   643→            <CardContent>
+   644→   644→              {orders.length === 0 ? <EmptyState icon={<AlertCircle className="h-10 w-10" />} msg="No hay pedidos" /> : (
+   645→   645→                <ScrollArea className="max-h-[500px]">
+   646→   646→                  <div className="space-y-2">{orders.map(order => (
+   647→   647→                    <div key={order.id} className="flex items-center justify-between p-3 rounded-xl border bg-white gap-3 flex-col sm:flex-row">
+   648→   648→                      <div className="flex-1 min-w-0">
+   649→   649→                        <div className="flex items-center gap-2 flex-wrap">
+   650→   650→                          <span className="font-semibold text-sm">{order.clientName}</span>
+   651→   651→                          <StatusBadge status={order.status} />
+   652→   652→                          <Badge variant="secondary">{SERVICE_LABELS[order.serviceType]}</Badge>
+   653→   653→                        </div>
+   654→   654→                        <p className="text-xs text-muted-foreground mt-1">{order.pickupDate} · {order.pickupTime} · {formatPrice(order.price)}</p>
+   655→   655→                      </div>
+   656→   656→                      <div className="flex items-center gap-2">
+   657→   657→                        <span className="text-sm font-bold text-emerald-600">{formatPrice(order.price)}</span>
+   658→   658→                        <Button variant="ghost" size="sm" onClick={() => openOrderDetail(order.id)}><Eye className="h-4 w-4" /></Button>
+   659→   659→                      </div>
+   660→   660→                    </div>
+   661→   661→                  ))}</div>
+   662→   662→                </ScrollArea>
+   663→   663→              )}
+   664→   664→            </CardContent>
+   665→   665→          </Card>
+   666→   666→        )}
+   667→   667→
+   668→   668→        {/* ═══ USUARIOS ═══ */}
+   669→   669→        {adminTab === 'users' && (
+   670→   670→          <Card className="border-0 shadow-md">
+   671→   671→            <CardHeader className="flex flex-row items-center justify-between">
+   672→   672→              <div><CardTitle className="text-lg">Gestión de Usuarios</CardTitle><CardDescription>{users.length} usuarios registrados</CardDescription></div>
+   673→   673→              <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => openUserModal()}><Plus className="h-4 w-4 mr-1" /> Nuevo</Button>
+   674→   674→            </CardHeader>
+   675→   675→            <CardContent>
+   676→   676→              <ScrollArea className="max-h-[500px]">
+   677→   677→                <div className="space-y-2">{users.map(u => (
+   678→   678→                  <div key={u.id} className="flex items-center justify-between p-3 rounded-xl border bg-white gap-2 flex-col sm:flex-row">
+   679→   679→                    <div className="flex-1 min-w-0">
+   680→   680→                      <div className="flex items-center gap-2 flex-wrap">
+   681→   681→                        <span className="font-semibold text-sm">{u.name}</span>
+   682→   682→                        <Badge variant="outline" className={u.role === 'ADMIN' ? 'bg-amber-100 text-amber-700' : u.role === 'WORKER' ? 'bg-violet-100 text-violet-700' : 'bg-teal-100 text-teal-700'}>
+   683→   683→                          {u.role === 'CLIENT' ? 'Cliente' : u.role === 'ADMIN' ? 'Admin' : 'Operario'}
+   684→   684→                        </Badge>
+   685→   685→                      </div>
+   686→   686→                      <p className="text-xs text-muted-foreground mt-0.5">{u.email}{u.phone ? ` · ${u.phone}` : ''}{u.address ? ` · ${u.address}` : ''}</p>
+   687→   687→                    </div>
+   688→   688→                    <div className="flex items-center gap-1">
+   689→   689→                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openUserModal(u)}><Edit3 className="h-3.5 w-3.5" /></Button>
+   690→   690→                      <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => deleteUser(u.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+   691→   691→                    </div>
+   692→   692→                  </div>
+   693→   693→                ))}</div>
+   694→   694→              </ScrollArea>
+   695→   695→            </CardContent>
+   696→   696→          </Card>
+   697→   697→        )}
+   698→   698→
+   699→   699→        {/* ═══ PRENDAS ═══ */}
+   700→   700→        {adminTab === 'garments' && (
+   701→   701→          <Card className="border-0 shadow-md">
+   702→   702→            <CardHeader>
+   703→   703→              <CardTitle className="text-lg">Prendas por Pedido</CardTitle>
+   704→   704→              <CardDescription>Selecciona un pedido para ver o agregar prendas</CardDescription>
+   705→   705→            </CardHeader>
+   706→   706→            <CardContent>
+   707→   707→              <div className="flex gap-2 mb-4">
+   708→   708→                <Select value="" onValueChange={v => v && openOrderDetail(v)}>
+   709→   709→                  <SelectTrigger className="max-w-xs"><SelectValue placeholder="Buscar pedido..." /></SelectTrigger>
+   710→   710→                  <SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>{o.clientName} — {SERVICE_LABELS[o.serviceType]} ({o.pickupDate})</SelectItem>)}</SelectContent>
+   711→   711→                </Select>
+   712→   712→              </div>
+   713→   713→              {selectedOrder && (
+   714→   714→                <div className="space-y-3">
+   715→   715→                  <div className="p-3 rounded-lg bg-muted/50 border">
+   716→   716→                    <div className="flex items-center gap-2 flex-wrap">
+   717→   717→                      <span className="font-semibold">{selectedOrder.clientName}</span>
+   718→   718→                      <StatusBadge status={selectedOrder.status} />
+   719→   719→                      <Badge variant="secondary">{SERVICE_LABELS[selectedOrder.serviceType]}</Badge>
+   720→   720→                    </div>
+   721→   721→                  </div>
+   722→   722→                  {selectedOrder.garments && selectedOrder.garments.length > 0 ? (
+   723→   723→                    <ScrollArea className="max-h-64">
+   724→   724→                      <div className="space-y-2">{selectedOrder.garments.map(g => (
+   725→   725→                        <div key={g.id} className="flex items-center justify-between p-3 rounded-xl border bg-white">
+   726→   726→                          <div><span className="font-semibold text-sm">{g.type}</span><span className="text-xs text-muted-foreground ml-2">{g.color ? g.color : ''} {g.brand ? `· ${g.brand}` : ''}</span><span className="text-xs text-muted-foreground ml-2">x{g.quantity}</span></div>
+   727→   727→                          <StatusBadge status={g.status} />
+   728→   728→                        </div>
+   729→   729→                      ))}</div>
+   730→   730→                    </ScrollArea>
+   731→   731→                  ) : <p className="text-sm text-muted-foreground text-center py-4">Este pedido no tiene prendas registradas</p>}
+   732→   732→                </div>
+   733→   733→              )}
+   734→   734→            </CardContent>
+   735→   735→          </Card>
+   736→   736→        )}
+   737→   737→
+   738→   738→        {/* ═══ INVENTARIO ═══ */}
+   739→   739→        {adminTab === 'inventory' && (
+   740→   740→          <Card className="border-0 shadow-md">
+   741→   741→            <CardHeader className="flex flex-row items-center justify-between">
+   742→   742→              <div><CardTitle className="text-lg">Inventario</CardTitle><CardDescription>{inventory.length} items registrados</CardDescription></div>
+   743→   743→              <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => openInvModal()}><Plus className="h-4 w-4 mr-1" /> Nuevo</Button>
+   744→   744→            </CardHeader>
+   745→   745→            <CardContent>
+   746→   746→              {inventory.length === 0 ? <EmptyState icon={<Warehouse className="h-10 w-10" />} msg="Inventario vacío" /> : (
+   747→   747→                <ScrollArea className="max-h-[500px]">
+   748→   748→                  <div className="space-y-2">{inventory.map(item => (
+   749→   749→                    <div key={item.id} className={`flex items-center justify-between p-3 rounded-xl border bg-white gap-2 flex-col sm:flex-row ${item.quantity <= item.minStock ? 'border-red-200 bg-red-50/30' : ''}`}>
+   750→   750→                      <div className="flex-1 min-w-0">
+   751→   751→                        <div className="flex items-center gap-2 flex-wrap">
+   752→   752→                          <span className="font-semibold text-sm">{item.name}</span>
+   753→   753→                          <Badge variant="secondary">{item.category}</Badge>
+   754→   754→                          {item.quantity <= item.minStock && <Badge className="bg-red-100 text-red-700 border-red-300">Stock bajo</Badge>}
+   755→   755→                        </div>
+   756→   756→                        <p className="text-xs text-muted-foreground mt-0.5">Stock: {item.quantity} {item.unit} · Mín: {item.minStock} · Costo: {formatPrice(item.cost)}</p>
+   757→   757→                      </div>
+   758→   758→                      <div className="flex items-center gap-1">
+   759→   759→                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openInvModal(item)}><Edit3 className="h-3.5 w-3.5" /></Button>
+   760→   760→                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => deleteInv(item.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+   761→   761→                      </div>
+   762→   762→                    </div>
+   763→   763→                  ))}</div>
+   764→   764→                </ScrollArea>
+   765→   765→              )}
+   766→   766→            </CardContent>
+   767→   767→          </Card>
+   768→   768→        )}
+   769→   769→
+   770→   770→        {/* ═══ MATERIALES ═══ */}
+   771→   771→        {adminTab === 'materials' && (
+   772→   772→          <Card className="border-0 shadow-md">
+   773→   773→            <CardHeader className="flex flex-row items-center justify-between">
+   774→   774→              <div><CardTitle className="text-lg">Materiales</CardTitle><CardDescription>{materials.length} materiales registrados</CardDescription></div>
+   775→   775→              <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => openMatModal()}><Plus className="h-4 w-4 mr-1" /> Nuevo</Button>
+   776→   776→            </CardHeader>
+   777→   777→            <CardContent>
+   778→   778→              {materials.length === 0 ? <EmptyState icon={<FlaskConical className="h-10 w-10" />} msg="Sin materiales registrados" /> : (
+   779→   779→                <ScrollArea className="max-h-[500px]">
+   780→   780→                  <div className="space-y-2">{materials.map(m => (
+   781→   781→                    <div key={m.id} className="flex items-center justify-between p-3 rounded-xl border bg-white gap-2 flex-col sm:flex-row">
+   782→   782→                      <div className="flex-1 min-w-0">
+   783→   783→                        <div className="flex items-center gap-2 flex-wrap">
+   784→   784→                          <span className="font-semibold text-sm">{m.name}</span>
+   785→   785→                          <Badge variant="secondary">{m.category}</Badge>
+   786→   786→                        </div>
+   787→   787→                        <p className="text-xs text-muted-foreground mt-0.5">Stock: {m.quantity} {m.unit} · Costo/unidad: {formatPrice(m.costPerUnit)}{m.supplier ? ` · Proveedor: ${m.supplier}` : ''}</p>
+   788→   788→                      </div>
+   789→   789→                      <div className="flex items-center gap-1">
+   790→   790→                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openMatModal(m)}><Edit3 className="h-3.5 w-3.5" /></Button>
+   791→   791→                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => deleteMat(m.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+   792→   792→                      </div>
+   793→   793→                    </div>
+   794→   794→                  ))}</div>
+   795→   795→                </ScrollArea>
+   796→   796→              )}
+   797→   797→            </CardContent>
+   798→   798→          </Card>
+   799→   799→        )}
+   800→   800→
+   801→   801→        {/* ═══ ENTREGAS ═══ */}
+   802→   802→        {adminTab === 'deliveries' && (
+   803→   803→          <Card className="border-0 shadow-md">
+   804→   804→            <CardHeader className="flex flex-row items-center justify-between">
+   805→   805→              <div><CardTitle className="text-lg">Gestión de Entregas</CardTitle><CardDescription>{deliveries.length} entregas registradas</CardDescription></div>
+   806→   806→              <div className="flex gap-2">
+   807→   807→                <Select value="" onValueChange={v => v && openDelModal(undefined, v)}>
+   808→   808→                  <SelectTrigger className="w-48 h-9"><SelectValue placeholder="Nueva entrega..." /></SelectTrigger>
+   809→   809→                  <SelectContent>{orders.filter(o => o.status === 'LISTO' && !deliveries.find(d => d.orderId === o.id)).map(o => (
+   810→   810→                    <SelectItem key={o.id} value={o.id}>{o.clientName} — {SERVICE_LABELS[o.serviceType]}</SelectItem>
+   811→   811→                  ))}</SelectContent>
+   812→   812→                </Select>
+   813→   813→              </div>
+   814→   814→            </CardHeader>
+   815→   815→            <CardContent>
+   816→   816→              {deliveries.length === 0 ? <EmptyState icon={<Truck className="h-10 w-10" />} msg="Sin entregas registradas" /> : (
+   817→   817→                <ScrollArea className="max-h-[500px]">
+   818→   818→                  <div className="space-y-2">{deliveries.map(d => (
+   819→   819→                    <div key={d.id} className="flex items-center justify-between p-3 rounded-xl border bg-white gap-3 flex-col sm:flex-row">
+   820→   820→                      <div className="flex-1 min-w-0">
+   821→   821→                        <div className="flex items-center gap-2 flex-wrap">
+   822→   822→                          <span className="font-semibold text-sm">{d.order?.clientName || 'N/A'}</span>
+   823→   823→                          <StatusBadge status={d.status} />
+   824→   824→                          <Badge variant="secondary">{d.order?.serviceType || ''}</Badge>
+   825→   825→                        </div>
+   826→   826→                        <p className="text-xs text-muted-foreground mt-0.5">Conductor: {d.driverName || 'Sin asignar'}{d.address ? ` · ${d.address}` : ''}{d.deliveredAt ? ` · Entregado: ${fmtDate(d.deliveredAt)}` : ''}</p>
+   827→   827→                      </div>
+   828→   828→                      <div className="flex items-center gap-1 flex-wrap">
+   829→   829→                        {d.status !== 'ENTREGADO' && (() => { const next = getNextStatus(d.status, DELIVERY_FLOW); return next ? (
+   830→   830→                          <Button size="sm" variant="outline" onClick={() => changeDelStatus(d.id, next)} className="text-xs h-8">
+   831→   831→                            <ChevronRight className="h-3 w-3 mr-0.5" /> {STATUS_LABELS[next]}
+   832→   832→                          </Button>
+   833→   833→                        ) : null })()}
+   834→   834→                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openDelModal(d)}><Edit3 className="h-3.5 w-3.5" /></Button>
+   835→   835→                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => deleteDel(d.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+   836→   836→                      </div>
+   837→   837→                    </div>
+   838→   838→                  ))}</div>
+   839→   839→                </ScrollArea>
+   840→   840→              )}
+   841→   841→            </CardContent>
+   842→   842→          </Card>
+   843→   843→        )}
+   844→   844→      </main>
+   845→   845→
+   846→   846→      {/* ═══ MODALS ═══ */}
+   847→   847→      <Modal open={showUserModal} onClose={() => setShowUserModal(false)} title={editId ? 'Editar Usuario' : 'Nuevo Usuario'}>
+   848→   848→        <div className="space-y-3">
+   849→   849→          <Field label="Nombre" required><Input value={userForm.name} onChange={e => setUserForm({ ...userForm, name: e.target.value })} /></Field>
+   850→   850→          <Field label="Correo" required><Input type="email" value={userForm.email} onChange={e => setUserForm({ ...userForm, email: e.target.value })} /></Field>
+   851→   851→          <Field label="Rol" required>
+   852→   852→            <Select value={userForm.role} onValueChange={v => setUserForm({ ...userForm, role: v })}>
+   853→   853→              <SelectTrigger><SelectValue /></SelectTrigger>
+   854→   854→              <SelectContent><SelectItem value="CLIENT">Cliente</SelectItem><SelectItem value="ADMIN">Administrador</SelectItem><SelectItem value="WORKER">Operario</SelectItem></SelectContent>
+   855→   855→            </Select>
+   856→   856→          </Field>
+   857→   857→          <Field label="Teléfono"><Input value={userForm.phone} onChange={e => setUserForm({ ...userForm, phone: e.target.value })} /></Field>
+   858→   858→          <Field label="Dirección"><Input value={userForm.address} onChange={e => setUserForm({ ...userForm, address: e.target.value })} /></Field>
+   859→   859→          <Field label="Contraseña"><Input type="password" value={userForm.password} onChange={e => setUserForm({ ...userForm, password: e.target.value })} /></Field>
+   860→   860→          <Button onClick={saveUser} disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-700"><Save className="h-4 w-4 mr-1" /> Guardar</Button>
+   861→   861→        </div>
+   862→   862→      </Modal>
+   863→   863→
+   864→   864→      <Modal open={showInvModal} onClose={() => setShowInvModal(false)} title={editId ? 'Editar Item' : 'Nuevo Item de Inventario'}>
+   865→   865→        <div className="space-y-3">
+   866→   866→          <Field label="Nombre" required><Input value={invForm.name} onChange={e => setInvForm({ ...invForm, name: e.target.value })} /></Field>
+   867→   867→          <Field label="Categoría">
+   868→   868→            <Select value={invForm.category} onValueChange={v => setInvForm({ ...invForm, category: v })}>
+   869→   869→              <SelectTrigger><SelectValue /></SelectTrigger>
+   870→   870→              <SelectContent>{INV_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+   871→   871→            </Select>
+   872→   872→          </Field>
+   873→   873→          <div className="grid grid-cols-2 gap-3">
+   874→   874→            <Field label="Cantidad"><Input type="number" value={invForm.quantity} onChange={e => setInvForm({ ...invForm, quantity: parseInt(e.target.value) || 0 })} /></Field>
+   875→   875→            <Field label="Unidad"><Input value={invForm.unit} onChange={e => setInvForm({ ...invForm, unit: e.target.value })} /></Field>
+   876→   876→            <Field label="Stock mínimo"><Input type="number" value={invForm.minStock} onChange={e => setInvForm({ ...invForm, minStock: parseInt(e.target.value) || 0 })} /></Field>
+   877→   877→            <Field label="Costo"><Input type="number" value={invForm.cost} onChange={e => setInvForm({ ...invForm, cost: parseFloat(e.target.value) || 0 })} /></Field>
+   878→   878→          </div>
+   879→   879→          <Button onClick={saveInv} disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-700"><Save className="h-4 w-4 mr-1" /> Guardar</Button>
+   880→   880→        </div>
+   881→   881→      </Modal>
+   882→   882→
+   883→   883→      <Modal open={showMatModal} onClose={() => setShowMatModal(false)} title={editId ? 'Editar Material' : 'Nuevo Material'}>
+   884→   884→        <div className="space-y-3">
+   885→   885→          <Field label="Nombre" required><Input value={matForm.name} onChange={e => setMatForm({ ...matForm, name: e.target.value })} /></Field>
+   886→   886→          <Field label="Categoría">
+   887→   887→            <Select value={matForm.category} onValueChange={v => setMatForm({ ...matForm, category: v })}>
+   888→   888→              <SelectTrigger><SelectValue /></SelectTrigger>
+   889→   889→              <SelectContent>{MAT_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+   890→   890→            </Select>
+   891→   891→          </Field>
+   892→   892→          <div className="grid grid-cols-2 gap-3">
+   893→   893→            <Field label="Cantidad"><Input type="number" step="0.1" value={matForm.quantity} onChange={e => setMatForm({ ...matForm, quantity: parseFloat(e.target.value) || 0 })} /></Field>
+   894→   894→            <Field label="Unidad"><Input value={matForm.unit} onChange={e => setMatForm({ ...matForm, unit: e.target.value })} /></Field>
+   895→   895→            <Field label="Costo/Unidad"><Input type="number" value={matForm.costPerUnit} onChange={e => setMatForm({ ...matForm, costPerUnit: parseFloat(e.target.value) || 0 })} /></Field>
+   896→   896→            <Field label="Proveedor"><Input value={matForm.supplier} onChange={e => setMatForm({ ...matForm, supplier: e.target.value })} /></Field>
+   897→   897→          </div>
+   898→   898→          <Button onClick={saveMat} disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-700"><Save className="h-4 w-4 mr-1" /> Guardar</Button>
+   899→   899→        </div>
+   900→   900→      </Modal>
+   901→   901→
+   902→   902→      <Modal open={showDelModal} onClose={() => setShowDelModal(false)} title={editId ? 'Editar Entrega' : 'Nueva Entrega'}>
+   903→   903→        <div className="space-y-3">
+   904→   904→          {!editId && (
+   905→   905→            <Field label="Pedido" required>
+   906→   906→              <Select value={delForm.orderId} onValueChange={v => setDelForm({ ...delForm, orderId: v })}>
+   907→   907→                <SelectTrigger><SelectValue placeholder="Seleccionar pedido..." /></SelectTrigger>
+   908→   908→                <SelectContent>{orders.filter(o => o.status === 'LISTO' && !deliveries.find(d => d.orderId === o.id)).map(o => (
+   909→   909→                  <SelectItem key={o.id} value={o.id}>{o.clientName} — {SERVICE_LABELS[o.serviceType]}</SelectItem>
+   910→   910→                ))}</SelectContent>
+   911→   911→              </Select>
+   912→   912→            </Field>
+   913→   913→          )}
+   914→   914→          <Field label="Conductor"><Input value={delForm.driverName} onChange={e => setDelForm({ ...delForm, driverName: e.target.value })} placeholder="Nombre del conductor" /></Field>
+   915→   915→          <Field label="Dirección de entrega"><Input value={delForm.address} onChange={e => setDelForm({ ...delForm, address: e.target.value })} placeholder="Dirección" /></Field>
+   916→   916→          <Field label="Notas"><Textarea value={delForm.notes} onChange={e => setDelForm({ ...delForm, notes: e.target.value })} /></Field>
+   917→   917→          <Button onClick={saveDel} disabled={loading || !delForm.orderId} className="w-full bg-emerald-600 hover:bg-emerald-700"><Save className="h-4 w-4 mr-1" /> Guardar</Button>
+   918→   918→        </div>
+   919→   919→      </Modal>
+   920→   920→
+   921→   921→      <Modal open={showOrderDetail} onClose={() => setShowOrderDetail(false)} title="Detalle del Pedido">
+   922→   922→        {selectedOrder && (
+   923→   923→          <div className="space-y-4">
+   924→   924→            <div className="grid grid-cols-2 gap-3">
+   925→   925→              <div><p className="text-xs text-muted-foreground">Cliente</p><p className="font-semibold text-sm">{selectedOrder.clientName}</p></div>
+   926→   926→              <div><p className="text-xs text-muted-foreground">Estado</p><StatusBadge status={selectedOrder.status} /></div>
+   927→   927→              <div><p className="text-xs text-muted-foreground">Servicio</p><p className="text-sm">{SERVICE_LABELS[selectedOrder.serviceType]}</p></div>
+   928→   928→              <div><p className="text-xs text-muted-foreground">Precio</p><p className="font-bold text-emerald-600">{formatPrice(selectedOrder.price)}</p></div>
+   929→   929→              <div><p className="text-xs text-muted-foreground">Recogida</p><p className="text-sm">{selectedOrder.pickupDate} a las {selectedOrder.pickupTime}</p></div>
+   930→   930→              <div><p className="text-xs text-muted-foreground">Creado</p><p className="text-sm">{fmtDate(selectedOrder.createdAt)}</p></div>
+   931→   931→            </div>
+   932→   932→            {selectedOrder.notes && <div><p className="text-xs text-muted-foreground">Notas</p><p className="text-sm italic">&ldquo;{selectedOrder.notes}&rdquo;</p></div>}
+   933→   933→            <div>
+   934→   934→              <p className="text-xs text-muted-foreground mb-2">Prendas ({selectedOrder.garments?.length || 0})</p>
+   935→   935→              {selectedOrder.garments && selectedOrder.garments.length > 0 ? (
+   936→   936→                <div className="space-y-1">{selectedOrder.garments.map(g => (
+   937→   937→                  <div key={g.id} className="flex items-center justify-between p-2 rounded-lg border bg-muted/30">
+   938→   938→                    <span className="text-sm">{g.type} {g.color ? `(${g.color})` : ''}</span>
+   939→   939→                    <div className="flex items-center gap-2"><span className="text-xs text-muted-foreground">x{g.quantity}</span><StatusBadge status={g.status} /></div>
+   940→   940→                  </div>
+   941→   941→                ))}</div>
+   942→   942→              ) : <p className="text-sm text-muted-foreground">Sin prendas registradas</p>}
+   943→   943→            </div>
+   944→   944→          </div>
+   945→   945→        )}
+   946→   946→      </Modal>
+   947→   947→
+   948→   948→      <Toaster position="top-center" />
+   949→   949→    </div>
+   950→   950→  )
+   951→   951→}
