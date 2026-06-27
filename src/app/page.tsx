@@ -305,21 +305,30 @@ export default function LaundryApp() {
     setUsers(u.data); setInventory(i.data); setMaterials(m.data); setDeliveries(d.data)
   }, [apiFetch])
 
-  // Socket
+  // Socket (graceful — works with or without WebSocket server)
   useEffect(() => {
-    const s = io('/?XTransformPort=3004', { transports: ['websocket', 'polling'], forceNew: true, reconnection: true, reconnectionAttempts: 10, reconnectionDelay: 1000 })
-    setSocket(s)
-    s.on('order-updated', (data: { action: string; order: OrderData }) => {
-      setOrders(prev => {
-        const idx = prev.findIndex(o => o.id === data.order.id)
-        if (idx >= 0) { const u = [...prev]; u[idx] = data.order; return u }
-        if (data.action === 'created') return [data.order, ...prev]
-        return prev
+    try {
+      const s = io(window.location.origin, {
+        path: '/ws', transports: ['polling', 'websocket'], forceNew: true,
+        reconnection: true, reconnectionAttempts: 3, reconnectionDelay: 2000,
+        timeout: 5000,
       })
-      fetchStats()
-      toast.success(data.action === 'created' ? 'Nuevo pedido creado' : 'Estado actualizado')
-    })
-    return () => { s.disconnect() }
+      s.on('connect_error', () => { /* WebSocket not available — app works without it */ })
+      s.on('order-updated', (data: { action: string; order: OrderData }) => {
+        setOrders(prev => {
+          const idx = prev.findIndex(o => o.id === data.order.id)
+          if (idx >= 0) { const u = [...prev]; u[idx] = data.order; return u }
+          if (data.action === 'created') return [data.order, ...prev]
+          return prev
+        })
+        fetchStats()
+        toast.success(data.action === 'created' ? 'Nuevo pedido creado' : 'Estado actualizado')
+      })
+      setSocket(s)
+      return () => { s.disconnect() }
+    } catch {
+      /* Socket not available — app works without real-time sync */
+    }
   }, [fetchStats])
 
   // Login
